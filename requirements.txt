@@ -637,3 +637,5 @@ yfinance==0.2.43
 youtube-transcript-api==1.2.3
 yt-dlp==2025.1.26
 zipp==3.19.2
+
+stripe==10.14.0

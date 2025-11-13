@@ -97,13 +97,13 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 class MoonDevAPI:
-    def __init__(self, api_key=None, base_url="http://api.moondev.com:8000"):
+    def __init__(self, api_key=None, base_url=None):
         """Initialize the API handler"""
         # Simplified data directory path
         self.base_dir = PROJECT_ROOT / "src" / "agents" / "api_data"
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.api_key = api_key or os.getenv('MOONDEV_API_KEY')
-        self.base_url = base_url
+        self.base_url = base_url or os.getenv('MOONDEV_API_BASE_URL') or "http://api.moondev.com:8000"
         self.headers = {'X-API-Key': self.api_key} if self.api_key else {}
         self.session = requests.Session()
         self.max_retries = 3
