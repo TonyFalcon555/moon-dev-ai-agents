@@ -180,7 +180,17 @@ CURRENT_DATE = datetime.now().strftime("%m_%d_%Y")
 
 # Update data directory paths - Parallel Multi-Data version uses its own folder
 PROJECT_ROOT = Path(__file__).parent.parent
-DATA_DIR = PROJECT_ROOT / "data/rbi_pp_multi"
+BASE_DATA_DIR = PROJECT_ROOT / "data" / "rbi_pp_multi"
+
+# Optional workspace name for multi-tenant dashboards.
+# When RBI_WORKSPACE_NAME is unset or "default", use the legacy single-tenant
+# layout at src/data/rbi_pp_multi. Otherwise, write into
+# src/data/rbi_pp_multi/<workspace>/.
+_workspace_name = os.getenv("RBI_WORKSPACE_NAME")
+if _workspace_name and _workspace_name != "default":
+    DATA_DIR = BASE_DATA_DIR / _workspace_name
+else:
+    DATA_DIR = BASE_DATA_DIR
 
 # 🌙 Moon Dev: These will be updated dynamically when date changes
 TODAY_DIR = None

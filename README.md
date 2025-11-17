@@ -24,6 +24,23 @@ feel free to join [our discord](https://discord.gg/8UPuVZ53bh) if you beleive ai
 
 ---
 
+## 💰 Monetization & SaaS Surfaces
+
+This repo now includes a full monetization spine you can run locally or
+deploy:
+
+- **Overview of products & plans:** `docs/products_plans.md`
+- **How the stack fits together:** `docs/monetization_overview.md`
+- **Deployment with Docker Compose:** `docs/deployment_stack.md`
+- **Market Data API usage:** `docs/api.md`
+- **Backtest Dashboard SaaS:** `docs/backtest_dashboard.md`
+- **Licensing & feature gates for agents:** `docs/licensing.md`
+
+Demo clients for quickly testing services are in `src/scripts/`:
+
+- `demo_alerts_client.py` – create & list alerts for a key
+- `demo_backtest_dashboard_client.py` – fetch stats & backtests per workspace
+
 ## 🤖 All Available Agents
 
 **⚠️ For live trading agents: Only use these AFTER thoroughly backtesting your strategies!**

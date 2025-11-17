@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -14,6 +15,10 @@ except Exception:
         add_key = None  # type: ignore
 
 app = FastAPI(title="Moon Dev Billing Service")
+
+@app.get("/health")
+async def health():
+    return JSONResponse({"status": "ok"})
 
 
 def _require_stripe():
@@ -122,7 +127,15 @@ async def webhook(request: Request):
                     "subscription_id": sub,
                     "price_id": price_id,
                 })
-                _ = add_key(plan=plan, rate_limit_override=rlo, metadata=meta)
+                key = add_key(plan=plan, rate_limit_override=rlo, metadata=meta)
+                try:
+                    logging.getLogger("billing").info(
+                        "Provisioned API key for plan=%s email=%s subscription=%s", plan, customer_email, sub
+                    )
+                    # Log the raw key for local testing visibility
+                    logging.getLogger("billing").info("New API key: %s", key)
+                except Exception:
+                    pass
             except Exception:
                 pass
 

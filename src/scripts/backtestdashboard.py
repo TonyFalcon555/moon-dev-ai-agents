@@ -28,12 +28,15 @@ Built with love by Moon Dev
 ================================================================================
 """
 
-from fastapi import FastAPI, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
+import os
+import hashlib
+from fastapi import FastAPI, Request, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
+from collections import defaultdict
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -52,8 +55,85 @@ import logging
 # Import MoonDevAPI from this project
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from agents.api import MoonDevAPI
+
+try:
+    from services.api_gateway.keystore import get_plan_for_key
+    _KS_OK = True
+except Exception:
+    try:
+        from ..services.api_gateway.keystore import get_plan_for_key  # type: ignore
+        _KS_OK = True
+    except Exception:  # pragma: no cover
+        _KS_OK = False
 import websockets
 import json
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+DATA_ROOT = BASE_DIR / "src" / "data"
+RBI_BASE_DIR = DATA_ROOT / "rbi_pp_multi"
+
+
+def get_workspace_root(workspace: str | None = None) -> Path:
+    """Return the root directory for a workspace.
+
+    The legacy single-user deployment stores data directly in
+    src/data/rbi_pp_multi. To stay backwards-compatible we treat the
+    "default" workspace (or missing workspace) as that root, while
+    other workspaces live under subdirectories.
+    """
+
+    if not workspace or workspace == "default":
+        root = RBI_BASE_DIR
+    else:
+        root = RBI_BASE_DIR / workspace
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def get_workspace_stats_csv(workspace: str) -> Path:
+    return get_workspace_root(workspace) / "backtest_stats.csv"
+
+
+def get_user_folders_dir(workspace: str) -> Path:
+    folder_root = get_workspace_root(workspace) / "user_folders"
+    folder_root.mkdir(parents=True, exist_ok=True)
+    return folder_root
+
+
+def _hash_api_key(raw_key: str) -> str:
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+
+def _workspace_from_request(request: Request, workspace_override: str | None = None) -> str:
+    if workspace_override:
+        return workspace_override
+    api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        return "default"
+    if _KS_OK:
+        plan = get_plan_for_key(api_key)
+        if not plan:
+            raise HTTPException(status_code=403, detail="Invalid or revoked API key for workspace access")
+    return _hash_api_key(api_key)[:16]
+
+
+def _resolve_stats_csv(request: Request, workspace_override: str | None = None) -> tuple[str, Path]:
+    workspace_name = _workspace_from_request(request, workspace_override)
+    return workspace_name, get_workspace_stats_csv(workspace_name)
+
+
+def _resolve_user_folders_dir(request: Request, workspace_override: str | None = None) -> tuple[str, Path]:
+    workspace_name = _workspace_from_request(request, workspace_override)
+    return workspace_name, get_user_folders_dir(workspace_name)
+
+
+def _resolve_workspace_assets(request: Request, workspace_override: str | None = None) -> tuple[str, Path, Path, Path]:
+    workspace_name = _workspace_from_request(request, workspace_override)
+    root = get_workspace_root(workspace_name)
+    stats_csv = root / "backtest_stats.csv"
+    folders_dir = root / "user_folders"
+    folders_dir.mkdir(parents=True, exist_ok=True)
+    return workspace_name, root, stats_csv, folders_dir
 
 # ============================================================================
 # 🔧 CONFIGURATION - CHANGE THESE PATHS TO MATCH YOUR SETUP!
@@ -62,14 +142,14 @@ import json
 # 📊 Path to your backtest stats CSV file
 # This CSV is created by rbi_agent_pp_multi.py after running backtests
 # Default: src/data/rbi_pp_multi/backtest_stats.csv
-STATS_CSV = Path("/Users/md/Dropbox/dev/github/moon-dev-ai-agents-for-trading/src/data/rbi_pp_multi/backtest_stats.csv")
+STATS_CSV = RBI_BASE_DIR / "backtest_stats.csv"
 
 # 📁 Directory for static files (CSS, JS) and templates (HTML)
 # These files are located in: src/data/rbi_pp_multi/static and src/data/rbi_pp_multi/templates
-TEMPLATE_BASE_DIR = Path("/Users/md/Dropbox/dev/github/moon-dev-ai-agents-for-trading/src/data/rbi_pp_multi")
+TEMPLATE_BASE_DIR = RBI_BASE_DIR
 
-# 🗂️ Directory to store user-created folders
-# Folders allow you to organize and group your backtest results
+# 🗂️ Directory to store user-created folders (default workspace legacy path)
+# New deployments should rely on get_user_folders_dir/workspace helpers
 USER_FOLDERS_DIR = TEMPLATE_BASE_DIR / "user_folders"
 
 # 🎯 Target return percentage (must match rbi_agent_pp_multi.py TARGET_RETURN)
@@ -81,19 +161,19 @@ DATA_DIR = TEMPLATE_BASE_DIR / "downloads"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # 📊 Test Data Sets Directory - Historical datasets for backtesting
-TEST_DATA_DIR = Path("/Users/md/Dropbox/dev/github/moon-dev-ai-agents-for-trading/src/data/private_data")
+TEST_DATA_DIR = DATA_ROOT / "private_data"
 
 # TEST MODE for data portal - Set to True for fast testing with sample data
 TEST_MODE = True
 
 # 🎯 Polymarket CSV Paths
-POLYMARKET_SWEEPS_CSV = Path("/Users/md/Dropbox/dev/github/Polymarket-Trading-Bots/data/sweeps_database.csv")
-POLYMARKET_EXPIRING_CSV = Path("/Users/md/Dropbox/dev/github/Polymarket-Trading-Bots/data/expiring_markets.csv")
+POLYMARKET_SWEEPS_CSV = DATA_ROOT / "polymarket" / "sweeps_database.csv"
+POLYMARKET_EXPIRING_CSV = DATA_ROOT / "polymarket" / "expiring_markets.csv"
 
 # 🎯 Liquidation CSV Paths
-LIQUIDATIONS_MINI_CSV = Path("/Users/md/Dropbox/dev/github/Untitled/binance_trades_mini.csv")
-LIQUIDATIONS_BIG_CSV = Path("/Users/md/Dropbox/dev/github/Untitled/binance_trades.csv")
-LIQUIDATIONS_GRAND_CSV = Path("/Users/md/Dropbox/dev/github/Untitled/binance.csv")
+LIQUIDATIONS_MINI_CSV = DATA_ROOT / "liquidations" / "binance_trades_mini.csv"
+LIQUIDATIONS_BIG_CSV = DATA_ROOT / "liquidations" / "binance_trades.csv"
+LIQUIDATIONS_GRAND_CSV = DATA_ROOT / "liquidations" / "binance.csv"
 
 # ============================================================================
 # 🚀 FASTAPI APP INITIALIZATION
@@ -108,8 +188,12 @@ app = FastAPI(title="Moon Dev's AI Agent Backtests")
 # Create user_folders directory if it doesn't exist
 USER_FOLDERS_DIR.mkdir(exist_ok=True)
 
-# Track running backtests
-running_backtests = {}
+# Track running backtests per workspace
+running_backtests: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+
+
+def _get_running_backtests(workspace_name: str) -> Dict[str, Dict[str, Any]]:
+    return running_backtests.setdefault(workspace_name, {})
 
 # 🌙 Moon Dev Data API Integration
 moon_api = MoonDevAPI()
@@ -295,25 +379,28 @@ async def home(request: Request):
 
 
 @app.get("/api/backtests")
-async def get_backtests():
+async def get_backtests(request: Request, workspace: str | None = None):
     """API endpoint to fetch all backtest data"""
     try:
-        if not STATS_CSV.exists():
+        workspace_name, stats_csv = _resolve_stats_csv(request, workspace)
+
+        if not stats_csv.exists():
             return JSONResponse({
                 "data": [],
-                "message": "No backtest data found yet. Run rbi_agent_pp_multi.py to generate results!"
+                "message": "No backtest data found yet. Run rbi_agent_pp_multi.py to generate results!",
+                "workspace": workspace_name,
             })
 
         # 🌙 Moon Dev: Read CSV with proper header handling
         # Check if header needs updating (old format without Exposure %)
-        with open(STATS_CSV, 'r') as f:
+        with open(stats_csv, 'r') as f:
             header_line = f.readline().strip()
 
         # If header is old format, read with names parameter to handle 13 columns
         if 'Exposure %' not in header_line:
             print("📊 Detected old CSV header format - reading with new column names")
             df = pd.read_csv(
-                STATS_CSV,
+                stats_csv,
                 names=['Strategy Name', 'Thread ID', 'Return %', 'Buy & Hold %',
                        'Max Drawdown %', 'Sharpe Ratio', 'Sortino Ratio', 'Exposure %',
                        'EV %', 'Trades', 'File Path', 'Data', 'Time'],
@@ -322,7 +409,7 @@ async def get_backtests():
             )
         else:
             # New format - read normally
-            df = pd.read_csv(STATS_CSV, on_bad_lines='warn')
+            df = pd.read_csv(stats_csv, on_bad_lines='warn')
 
         # Debug: Print columns
         print(f"📊 CSV Columns: {list(df.columns)}")
@@ -364,6 +451,7 @@ async def get_backtests():
         return JSONResponse({
             "data": data,
             "total": len(data),
+            "workspace": workspace_name,
             "message": f"Loaded {len(data)} backtest results"
         })
 
@@ -379,10 +467,12 @@ async def get_backtests():
 
 
 @app.get("/api/stats")
-async def get_stats():
+async def get_stats(request: Request, workspace: str | None = None):
     """API endpoint for summary statistics"""
     try:
-        if not STATS_CSV.exists():
+        workspace_name, stats_csv = _resolve_stats_csv(request, workspace)
+
+        if not stats_csv.exists():
             return JSONResponse({
                 "total_backtests": 0,
                 "unique_strategies": 0,
@@ -390,17 +480,18 @@ async def get_stats():
                 "avg_return": 0,
                 "max_return": 0,
                 "avg_sortino": 0,
+                "workspace": workspace_name,
                 "message": "No data yet"
             })
 
         # 🌙 Moon Dev: Read CSV with proper header handling
-        with open(STATS_CSV, 'r') as f:
+        with open(stats_csv, 'r') as f:
             header_line = f.readline().strip()
 
         # If header is old format, read with names parameter to handle 13 columns
         if 'Exposure %' not in header_line:
             df = pd.read_csv(
-                STATS_CSV,
+                stats_csv,
                 names=['Strategy Name', 'Thread ID', 'Return %', 'Buy & Hold %',
                        'Max Drawdown %', 'Sharpe Ratio', 'Sortino Ratio', 'Exposure %',
                        'EV %', 'Trades', 'File Path', 'Data', 'Time'],
@@ -408,7 +499,7 @@ async def get_stats():
                 on_bad_lines='warn'
             )
         else:
-            df = pd.read_csv(STATS_CSV, on_bad_lines='warn')
+            df = pd.read_csv(stats_csv, on_bad_lines='warn')
 
         print(f"📊 Stats CSV Columns: {list(df.columns)}")
 
@@ -453,6 +544,8 @@ async def get_stats():
             "avg_sortino": safe_stat(df_filtered['Sortino Ratio'], lambda s: s.mean()) if 'Sortino Ratio' in df_filtered.columns else 0,
         }
 
+        stats["workspace"] = workspace_name
+
         return JSONResponse(stats)
 
     except Exception as e:
@@ -463,23 +556,25 @@ async def get_stats():
 
 
 @app.get("/api/folders")
-async def get_folders():
-    """🌙 Moon Dev: Get list of all folder names"""
+async def get_folders(request: Request, workspace: str | None = None):
+    """🌙 Moon Dev: Get list of all folder names for a workspace"""
     try:
-        folders = [f.name for f in USER_FOLDERS_DIR.iterdir() if f.is_dir()]
-        return JSONResponse({"folders": sorted(folders)})
+        workspace_name, folders_dir = _resolve_user_folders_dir(request, workspace)
+        folders = [f.name for f in folders_dir.iterdir() if f.is_dir()]
+        return JSONResponse({"workspace": workspace_name, "folders": sorted(folders)})
     except Exception as e:
         print(f"❌ Error in /api/folders: {str(e)}")
         return JSONResponse({"folders": [], "error": str(e)}, status_code=500)
 
 
 @app.get("/api/folders/list")
-async def list_folders_with_details():
-    """🌙 Moon Dev: Get folders with backtest counts"""
+async def list_folders_with_details(request: Request, workspace: str | None = None):
+    """🌙 Moon Dev: Get folders with backtest counts for a workspace"""
     try:
+        workspace_name, folders_dir = _resolve_user_folders_dir(request, workspace)
         folders_info = []
 
-        for folder_path in USER_FOLDERS_DIR.iterdir():
+        for folder_path in folders_dir.iterdir():
             if folder_path.is_dir():
                 csv_path = folder_path / "backtest_stats.csv"
                 count = 0
@@ -493,7 +588,7 @@ async def list_folders_with_details():
                     "count": count
                 })
 
-        return JSONResponse({"folders": sorted(folders_info, key=lambda x: x['name'])})
+        return JSONResponse({"workspace": workspace_name, "folders": sorted(folders_info, key=lambda x: x['name'])})
 
     except Exception as e:
         print(f"❌ Error in /api/folders/list: {str(e)}")
@@ -503,19 +598,21 @@ async def list_folders_with_details():
 
 
 @app.get("/api/folders/dates")
-async def list_date_folders():
+async def list_date_folders(request: Request, workspace: str | None = None):
     """🌙 Moon Dev: Get auto-generated date folders from backtest Time column"""
     try:
-        if not STATS_CSV.exists():
-            return JSONResponse({"dates": [], "message": "No backtest data found"})
+        workspace_name, stats_csv = _resolve_stats_csv(request, workspace)
+
+        if not stats_csv.exists():
+            return JSONResponse({"workspace": workspace_name, "dates": [], "message": "No backtest data found"})
 
         # Read CSV
-        with open(STATS_CSV, 'r') as f:
+        with open(stats_csv, 'r') as f:
             header_line = f.readline().strip()
 
         if 'Exposure %' not in header_line:
             df = pd.read_csv(
-                STATS_CSV,
+                stats_csv,
                 names=['Strategy Name', 'Thread ID', 'Return %', 'Buy & Hold %',
                        'Max Drawdown %', 'Sharpe Ratio', 'Sortino Ratio', 'Exposure %',
                        'EV %', 'Trades', 'File Path', 'Data', 'Time'],
@@ -523,7 +620,7 @@ async def list_date_folders():
                 on_bad_lines='warn'
             )
         else:
-            df = pd.read_csv(STATS_CSV, on_bad_lines='warn')
+            df = pd.read_csv(stats_csv, on_bad_lines='warn')
 
         if 'Time' not in df.columns or len(df) == 0:
             return JSONResponse({"dates": [], "message": "No Time data found"})
@@ -556,7 +653,7 @@ async def list_date_folders():
         # Sort by date descending (most recent first)
         dates_info.sort(key=lambda x: datetime.strptime(x['name'], "%m-%d-%Y"), reverse=True)
 
-        return JSONResponse({"dates": dates_info})
+        return JSONResponse({"workspace": workspace_name, "dates": dates_info})
 
     except Exception as e:
         print(f"❌ Error in /api/folders/dates: {str(e)}")
@@ -566,22 +663,25 @@ async def list_date_folders():
 
 
 @app.get("/api/backtests/by-date/{date}")
-async def get_backtests_by_date(date: str):
+async def get_backtests_by_date(date: str, request: Request, workspace: str | None = None):
     """🌙 Moon Dev: Get backtests filtered by date (MM-DD-YYYY format)"""
     try:
-        if not STATS_CSV.exists():
+        workspace_name, stats_csv = _resolve_stats_csv(request, workspace)
+
+        if not stats_csv.exists():
             return JSONResponse({
+                "workspace": workspace_name,
                 "data": [],
                 "message": f"No backtest data found for {date}"
             })
 
         # Read CSV
-        with open(STATS_CSV, 'r') as f:
+        with open(stats_csv, 'r') as f:
             header_line = f.readline().strip()
 
         if 'Exposure %' not in header_line:
             df = pd.read_csv(
-                STATS_CSV,
+                stats_csv,
                 names=['Strategy Name', 'Thread ID', 'Return %', 'Buy & Hold %',
                        'Max Drawdown %', 'Sharpe Ratio', 'Sortino Ratio', 'Exposure %',
                        'EV %', 'Trades', 'File Path', 'Data', 'Time'],
@@ -589,7 +689,7 @@ async def get_backtests_by_date(date: str):
                 on_bad_lines='warn'
             )
         else:
-            df = pd.read_csv(STATS_CSV, on_bad_lines='warn')
+            df = pd.read_csv(stats_csv, on_bad_lines='warn')
 
         if 'Time' not in df.columns or len(df) == 0:
             return JSONResponse({
@@ -653,6 +753,7 @@ async def get_backtests_by_date(date: str):
             data.append(cleaned_record)
 
         return JSONResponse({
+            "workspace": workspace_name,
             "data": data,
             "total": len(data),
             "message": f"Found {len(data)} backtests for {date}"
@@ -666,14 +767,15 @@ async def get_backtests_by_date(date: str):
 
 
 @app.post("/api/folders/add")
-async def add_to_folder(request: AddToFolderRequest):
+async def add_to_folder(payload: AddToFolderRequest, request: Request, workspace: str | None = None):
     """🌙 Moon Dev: Add backtests to a folder (duplicates rows, doesn't move)"""
     try:
-        folder_name = request.folder_name
-        backtests = request.backtests
+        workspace_name, folders_dir = _resolve_user_folders_dir(request, workspace)
+        folder_name = payload.folder_name
+        backtests = payload.backtests
 
         # Create folder if it doesn't exist
-        folder_path = USER_FOLDERS_DIR / folder_name
+        folder_path = folders_dir / folder_name
         folder_path.mkdir(exist_ok=True)
 
         folder_csv = folder_path / "backtest_stats.csv"
@@ -692,6 +794,7 @@ async def add_to_folder(request: AddToFolderRequest):
             print(f"📁 Created new folder '{folder_name}' with {len(new_df)} backtests")
 
         return JSONResponse({
+            "workspace": workspace_name,
             "success": True,
             "message": f"Added {len(backtests)} backtest(s) to '{folder_name}'"
         })
@@ -708,10 +811,11 @@ async def add_to_folder(request: AddToFolderRequest):
 
 
 @app.get("/api/folders/{folder_name}/paths")
-async def get_folder_paths(folder_name: str):
+async def get_folder_paths(folder_name: str, request: Request, workspace: str | None = None):
     """🌙 Moon Dev: Get all file paths from a folder"""
     try:
-        folder_path = USER_FOLDERS_DIR / folder_name
+        workspace_name, folders_dir = _resolve_user_folders_dir(request, workspace)
+        folder_path = folders_dir / folder_name
         csv_path = folder_path / "backtest_stats.csv"
 
         if not csv_path.exists():
@@ -735,6 +839,7 @@ async def get_folder_paths(folder_name: str):
         print(f"📁 Retrieved {len(paths)} paths from folder '{folder_name}'")
 
         return JSONResponse({
+            "workspace": workspace_name,
             "success": True,
             "paths": paths,
             "count": len(paths)
@@ -752,17 +857,21 @@ async def get_folder_paths(folder_name: str):
 
 
 @app.get("/api/backtest/status/{run_name}")
-async def get_backtest_status(run_name: str):
-    """🌙 Moon Dev: Check status of a running backtest"""
+async def get_backtest_status(run_name: str, request: Request, workspace: str | None = None):
+    """🌙 Moon Dev: Check status of a running backtest for a workspace"""
     try:
-        if run_name not in running_backtests:
+        workspace_name = _workspace_from_request(request, workspace)
+        rb = _get_running_backtests(workspace_name)
+        if run_name not in rb:
             return JSONResponse({
+                "workspace": workspace_name,
                 "status": "not_found",
                 "message": f"No backtest found with name '{run_name}'"
             })
 
-        status_info = running_backtests[run_name]
+        status_info = rb[run_name]
         return JSONResponse({
+            "workspace": workspace_name,
             "status": status_info["status"],
             "new_count": status_info["new_count"],
             "run_name": run_name
@@ -777,23 +886,26 @@ async def get_backtest_status(run_name: str):
 
 
 @app.post("/api/folders/delete")
-async def delete_folder(request: DeleteFolderRequest):
+async def delete_folder(payload: DeleteFolderRequest, request: Request, workspace: str | None = None):
     """🌙 Moon Dev: Delete a folder and all its contents"""
     try:
-        folder_name = request.folder_name
-        folder_path = USER_FOLDERS_DIR / folder_name
+        workspace_name, folders_dir = _resolve_user_folders_dir(request, workspace)
+        folder_name = payload.folder_name
+        folder_path = folders_dir / folder_name
 
         if not folder_path.exists():
             return JSONResponse({
+                "workspace": workspace_name,
                 "success": False,
                 "message": f"Folder '{folder_name}' does not exist"
             }, status_code=404)
 
         # Delete the entire folder
         shutil.rmtree(folder_path)
-        print(f"🗑️ Deleted folder '{folder_name}'")
+        print(f"🗑️ Deleted folder '{folder_name}' in workspace '{workspace_name}'")
 
         return JSONResponse({
+            "workspace": workspace_name,
             "success": True,
             "message": f"Deleted folder '{folder_name}'"
         })
@@ -810,17 +922,19 @@ async def delete_folder(request: DeleteFolderRequest):
 
 
 @app.post("/api/backtest/run")
-async def run_backtest(request: BacktestRunRequest):
-    """🌙 Moon Dev: Run rbi_agent_pp_multi.py with custom ideas"""
+async def run_backtest(payload: BacktestRunRequest, request: Request, workspace: str | None = None):
+    """🌙 Moon Dev: Run rbi_agent_pp_multi.py with custom ideas for a workspace"""
     try:
-        ideas = request.ideas
-        run_name = request.run_name
+        workspace_name, workspace_root, stats_csv, folders_dir = _resolve_workspace_assets(request, workspace)
 
-        print(f"\n🚀 Starting backtest run: '{run_name}'")
+        ideas = payload.ideas
+        run_name = payload.run_name
+
+        print(f"\n🚀 Starting backtest run: '{run_name}' in workspace '{workspace_name}'")
         print(f"📝 Ideas:\n{ideas}\n")
 
-        # Create temp ideas file in the template base dir
-        temp_ideas_file = TEMPLATE_BASE_DIR / f"temp_ideas_{run_name}.txt"
+        # Create temp ideas file in the workspace root
+        temp_ideas_file = workspace_root / f"temp_ideas_{run_name}.txt"
         with open(temp_ideas_file, 'w') as f:
             f.write(ideas)
 
@@ -836,30 +950,36 @@ async def run_backtest(request: BacktestRunRequest):
             }, status_code=404)
 
         # Create snapshot of CSV before running (for auto-add to folder later)
-        csv_before_path = TEMPLATE_BASE_DIR / f"temp_csv_before_{run_name}.csv"
-        if STATS_CSV.exists():
-            shutil.copy(STATS_CSV, csv_before_path)
-            print(f"📸 Created CSV snapshot for comparison")
+        csv_before_path = workspace_root / f"temp_csv_before_{run_name}.csv"
+        if stats_csv.exists():
+            shutil.copy(stats_csv, csv_before_path)
+            print(f"📸 Created CSV snapshot for comparison: {csv_before_path}")
+
+        rb = _get_running_backtests(workspace_name)
 
         # Function to run in background
         def run_backtest_background():
             try:
                 print(f"\n{'='*60}")
-                print(f"🏃 Running backtest script for '{run_name}'...")
+                print(f"🏃 Running backtest script for '{run_name}' in workspace '{workspace_name}'...")
                 print(f"{'='*60}\n")
 
-                running_backtests[run_name] = {"status": "running", "new_count": 0}
+                rb[run_name] = {"status": "running", "new_count": 0}
+
+                env = os.environ.copy()
+                env["RBI_WORKSPACE_NAME"] = workspace_name
 
                 # Run the script with temp ideas file
                 result = subprocess.run(
                     ["python", str(script_path), "--ideas-file", str(temp_ideas_file), "--run-name", run_name],
                     capture_output=True,
                     text=True,
-                    timeout=3600  # 1 hour timeout
+                    timeout=3600,  # 1 hour timeout
+                    env=env,
                 )
 
                 print(f"\n{'='*60}")
-                print(f"✅ BACKTEST COMPLETED: '{run_name}'")
+                print(f"✅ BACKTEST COMPLETED: '{run_name}' (workspace '{workspace_name}')")
                 print(f"{'='*60}")
                 print(f"Return code: {result.returncode}")
                 if result.returncode != 0:
@@ -880,29 +1000,30 @@ async def run_backtest(request: BacktestRunRequest):
 
                 # Auto-add results to folder
                 print(f"\n{'='*60}")
-                new_count = auto_add_to_folder(run_name, str(csv_before_path))
+                new_count = auto_add_to_folder(workspace_name, run_name, stats_csv, folders_dir, str(csv_before_path))
                 print(f"{'='*60}\n")
 
-                running_backtests[run_name] = {"status": "complete", "new_count": new_count}
+                rb[run_name] = {"status": "complete", "new_count": new_count}
 
             except subprocess.TimeoutExpired:
                 print(f"\n{'='*60}")
-                print(f"❌ Backtest '{run_name}' timed out after 1 hour")
+                print(f"❌ Backtest '{run_name}' in workspace '{workspace_name}' timed out after 1 hour")
                 print(f"{'='*60}\n")
-                running_backtests[run_name] = {"status": "timeout", "new_count": 0}
+                rb[run_name] = {"status": "timeout", "new_count": 0}
             except Exception as e:
                 print(f"\n{'='*60}")
-                print(f"❌ Error running backtest '{run_name}': {str(e)}")
+                print(f"❌ Error running backtest '{run_name}' in workspace '{workspace_name}': {str(e)}")
                 print(f"{'='*60}")
                 import traceback
                 traceback.print_exc()
-                running_backtests[run_name] = {"status": "error", "new_count": 0}
+                rb[run_name] = {"status": "error", "new_count": 0}
 
         # Start background thread
         thread = threading.Thread(target=run_backtest_background, daemon=True)
         thread.start()
 
         return JSONResponse({
+            "workspace": workspace_name,
             "success": True,
             "message": f"Backtest '{run_name}' started in background",
             "run_name": run_name
@@ -1265,24 +1386,37 @@ async def websocket_liquidations(websocket: WebSocket):
 # 🌙 BACKTEST FOLDER OPERATIONS
 # ============================================================================
 
-def auto_add_to_folder(run_name: str, csv_before_path: str) -> int:
-    """🌙 Moon Dev: Automatically add new winning backtests to a folder"""
-    try:
-        print(f"📁 Auto-adding results to folder '{run_name}'...")
+def auto_add_to_folder(
+    workspace_name: str,
+    run_name: str,
+    stats_csv: Path,
+    folders_dir: Path,
+    csv_before_path: str,
+) -> int:
+    """🌙 Moon Dev: Automatically add new winning backtests to a folder.
 
-        # Read main CSV
-        if not STATS_CSV.exists():
-            print(f"❌ Main CSV not found")
+    Compares the current workspace CSV against a snapshot taken before the run
+    and copies any new rows into a per-run folder under the workspace's
+    user_folders directory.
+    """
+
+    try:
+        print(f"📁 Auto-adding results to folder '{run_name}' in workspace '{workspace_name}'...")
+
+        # Read main CSV for this workspace
+        if not stats_csv.exists():
+            print(f"❌ Main CSV not found for workspace '{workspace_name}' at {stats_csv}")
             return 0
 
-        df_after = pd.read_csv(STATS_CSV)
+        df_after = pd.read_csv(stats_csv)
 
         # Read CSV snapshot from before run
-        if not Path(csv_before_path).exists():
-            print(f"❌ Before-run CSV snapshot not found")
+        before_path = Path(csv_before_path)
+        if not before_path.exists():
+            print(f"❌ Before-run CSV snapshot not found at {before_path}")
             return 0
 
-        df_before = pd.read_csv(csv_before_path)
+        df_before = pd.read_csv(before_path)
 
         # Find new rows (rows in df_after that aren't in df_before)
         # Simple approach: compare row counts and take the difference
@@ -1291,16 +1425,16 @@ def auto_add_to_folder(run_name: str, csv_before_path: str) -> int:
         new_count = after_count - before_count
 
         if new_count <= 0:
-            print(f"ℹ️ Zero backtests passed the {SAVE_IF_OVER_RETURN}% return threshold")
+            print(f"ℹ️ Zero backtests passed the {SAVE_IF_OVER_RETURN}% return threshold for workspace '{workspace_name}'")
             return 0
 
-        print(f"✅ Found {new_count} new backtest(s)")
+        print(f"✅ Found {new_count} new backtest(s) for workspace '{workspace_name}'")
 
         # Get the new rows (last N rows)
         new_rows = df_after.tail(new_count)
 
-        # Create folder
-        folder_path = USER_FOLDERS_DIR / run_name
+        # Create workspace folder for this run
+        folder_path = folders_dir / run_name
         folder_path.mkdir(exist_ok=True)
 
         folder_csv = folder_path / "backtest_stats.csv"
@@ -1308,17 +1442,20 @@ def auto_add_to_folder(run_name: str, csv_before_path: str) -> int:
         # Save new rows to folder CSV
         new_rows.to_csv(folder_csv, index=False)
 
-        print(f"✅ Successfully added {new_count} backtest(s) to folder '{run_name}'")
+        print(f"✅ Successfully added {new_count} backtest(s) to folder '{run_name}' in workspace '{workspace_name}'")
         print(f"📂 Folder location: {folder_path}")
 
         # Clean up snapshot
-        Path(csv_before_path).unlink()
-        print(f"🗑️ Cleaned up CSV snapshot")
+        try:
+            before_path.unlink()
+            print(f"🗑️ Cleaned up CSV snapshot at {before_path}")
+        except Exception:
+            pass
 
         return new_count
 
     except Exception as e:
-        print(f"❌ Error in auto_add_to_folder: {str(e)}")
+        print(f"❌ Error in auto_add_to_folder (workspace '{workspace_name}'): {str(e)}")
         import traceback
         traceback.print_exc()
         return 0

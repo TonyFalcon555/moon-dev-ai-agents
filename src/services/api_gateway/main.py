@@ -5,8 +5,10 @@ from typing import Dict, Tuple
 
 import requests
 import logging
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 # Optional keystore integration
 KEYSTORE_ENABLED = os.getenv("USE_KEYSTORE", "0").lower() in ("1", "true", "yes")
@@ -21,7 +23,18 @@ except Exception:
         _KS_OK = False
 
 UPSTREAM = os.getenv("UPSTREAM_API_BASE_URL", "http://api.moondev.com:8000")
+UPSTREAM_API_KEY = os.getenv("UPSTREAM_API_KEY")
 
+# Optional usage store integration
+try:
+    from src.services.api_gateway.usage_store import init_db as init_usage_db, record_usage, summarize as usage_summarize
+    _US_OK = True
+except Exception:
+    try:
+        from .usage_store import init_db as init_usage_db, record_usage, summarize as usage_summarize
+        _US_OK = True
+    except Exception:
+        _US_OK = False
 
 def _parse_keys(env_val: str | None) -> Dict[str, str]:
     mapping: Dict[str, str] = {}
@@ -52,10 +65,26 @@ rate_state: Dict[str, Dict[str, int]] = {}
 
 app = FastAPI(title="Moon Dev API Gateway")
 
+# CORS (permissive; tighten in production)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
 @app.on_event("startup")
 def _startup():
+    # Load .env for local dev convenience
+    try:
+        load_dotenv()
+    except Exception:
+        pass
     if KEYSTORE_ENABLED and _KS_OK:
         init_db()
+    if _US_OK:
+        init_usage_db()
     global metrics
     metrics = {
         "requests_total": 0,
@@ -149,7 +178,7 @@ def metrics_endpoint() -> JSONResponse:
 @app.get("/files/{filename:path}")
 def proxy_files(filename: str, request: Request, limit: int | None = None):
     api_key = request.headers.get("X-API-Key")
-    _check_key_and_rate_limit(api_key)
+    plan, _, _ = _check_key_and_rate_limit(api_key)
 
     params: Dict[str, str] = {}
     if limit is not None:
@@ -159,6 +188,13 @@ def proxy_files(filename: str, request: Request, limit: int | None = None):
     rng = request.headers.get("range") or request.headers.get("Range")
     if rng:
         headers["Range"] = rng
+    # Forward upstream auth
+    if UPSTREAM_API_KEY:
+        headers["X-API-Key"] = UPSTREAM_API_KEY
+    else:
+        # fallback: forward inbound key (suitable for testing)
+        if api_key:
+            headers["X-API-Key"] = api_key
 
     url = f"{UPSTREAM.rstrip('/')}/files/{filename}"
     try:
@@ -185,6 +221,12 @@ def proxy_files(filename: str, request: Request, limit: int | None = None):
             if chunk:
                 yield chunk
 
+    if _US_OK and api_key and plan:
+        try:
+            record_usage(api_key, plan, f"/files/{filename}")
+        except Exception:
+            pass
+
     return StreamingResponse(
         _iter_stream(),
         media_type=content_type,
@@ -194,6 +236,63 @@ def proxy_files(filename: str, request: Request, limit: int | None = None):
             "Accept-Ranges": upstream_resp.headers.get("accept-ranges", ""),
         },
     )
+
+
+@app.get("/copybot/data/{resource:path}")
+def proxy_copybot(resource: str, request: Request):
+    api_key = request.headers.get("X-API-Key")
+    plan, _, _ = _check_key_and_rate_limit(api_key)
+
+    headers: Dict[str, str] = {}
+    # Forward upstream auth
+    if UPSTREAM_API_KEY:
+        headers["X-API-Key"] = UPSTREAM_API_KEY
+    else:
+        if api_key:
+            headers["X-API-Key"] = api_key
+
+    url = f"{UPSTREAM.rstrip('/')}/copybot/data/{resource}"
+    try:
+        upstream_resp = requests.get(
+            url,
+            headers=headers,
+            stream=True,
+            timeout=(10, 120),
+        )
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Upstream error: {e.__class__.__name__}")
+
+    if upstream_resp.status_code >= 400:
+        raise HTTPException(
+            status_code=upstream_resp.status_code,
+            detail=f"Upstream returned {upstream_resp.status_code}",
+        )
+
+    content_type = upstream_resp.headers.get("content-type", "application/octet-stream")
+
+    def _iter_stream2():
+        for chunk in upstream_resp.iter_content(chunk_size=8192):
+            if chunk:
+                yield chunk
+
+    if _US_OK and api_key and plan:
+        try:
+            record_usage(api_key, plan, f"/copybot/data/{resource}")
+        except Exception:
+            pass
+
+    return StreamingResponse(_iter_stream2(), media_type=content_type)
+
+
+@app.get("/usage/summary")
+def usage_summary() -> JSONResponse:
+    if not _US_OK:
+        raise HTTPException(status_code=503, detail="Usage store not available")
+    try:
+        data = usage_summarize()
+        return JSONResponse({"date": datetime.now(timezone.utc).date().isoformat(), "items": data})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Usage summary error: {e.__class__.__name__}")
 
 
 if __name__ == "__main__":

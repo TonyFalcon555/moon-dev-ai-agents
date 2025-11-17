@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: src/services/api_gateway/Dockerfile
+    container_name: moondev-api-gateway
+    ports:
+      - "8010:8010"
+    environment:
+      USE_KEYSTORE: "1"
+      PORT: "8010"
+      KEYSTORE_DB_PATH: "/data/keystore.sqlite3"
+      USAGE_DB_PATH: "/data/usage.sqlite3"
+      UPSTREAM_API_BASE_URL: "http://api.moondev.com:8000"
+      # UPSTREAM_API_KEY: "changeme"
+    volumes:
+      - api_data:/data
+
+  billing:
+    build:
+      context: .
+      dockerfile: src/services/billing/Dockerfile
+    container_name: moondev-billing
+    ports:
+      - "8011:8011"
+    environment:
+      STRIPE_SECRET_KEY: "changeme"
+      STRIPE_WEBHOOK_SECRET: "changeme"
+      PRICE_ID_PRO: "price_pro_changeme"
+      PRICE_ID_TEAM: "price_team_changeme"
+      PRICE_ID_ENTERPRISE: "price_enterprise_changeme"
+      RATE_LIMIT_PRO: "600"
+      RATE_LIMIT_TEAM: "2400"
+      RATE_LIMIT_ENTERPRISE: "10000"
+      KEYSTORE_DB_PATH: "/data/keystore.sqlite3"
+    volumes:
+      - api_data:/data
+    depends_on:
+      - api-gateway
+
+  alerts:
+    build:
+      context: .
+      dockerfile: src/services/alerts/Dockerfile
+    container_name: moondev-alerts
+    ports:
+      - "8012:8012"
+    environment:
+      ALERTS_PORT: "8012"
+      ALERTS_DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/your_webhook_here"
+      KEYSTORE_DB_PATH: "/data/keystore.sqlite3"
+      ALERTS_MAX_FREE: "3"
+      ALERTS_MAX_PRO: "20"
+      ALERTS_MAX_TEAM: "50"
+      ALERTS_MAX_ENTERPRISE: "200"
+    volumes:
+      - api_data:/data
+    depends_on:
+      - api-gateway
+
+  backtest-dashboard:
+    build:
+      context: .
+      dockerfile: src/services/backtest_dashboard/Dockerfile
+    container_name: moondev-backtest-dashboard
+    ports:
+      - "8002:8002"
+    environment:
+      # Example overrides; adjust as needed for your deployment
+      # TEST_MODE: "1"
+      # RBI_WORKSPACE_NAME: "default"
+      # LICENSE_GATEWAY_URL: "http://api-gateway:8010"
+      # LICENSE_API_KEY: "md_your_license_key"
+      # REQUIRE_LICENSE: "0"
+    volumes:
+      - backtest_data:/app/src/data
+    depends_on:
+      - api-gateway
+
+volumes:
+  api_data:
+  backtest_data:

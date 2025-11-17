@@ -147,12 +147,16 @@ from urllib.parse import quote
 # Add project root to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
+from src.licensing import ensure_feature_license
 from src.models.model_factory import model_factory
 
 # Setup paths relative to src/data/
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_DIR = PROJECT_ROOT / 'data' / CLIPS_BASE_FOLDER
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Enforce licensing for realtime clips agent
+ensure_feature_license("clips")
 
 # Load Whisper model (runs locally, free!)
 cprint("🔧 Loading Whisper model (this only happens once)...", "cyan")

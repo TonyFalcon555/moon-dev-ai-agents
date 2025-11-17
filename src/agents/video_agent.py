@@ -19,10 +19,20 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 from termcolor import cprint
 from dotenv import load_dotenv
+
+# Add project root to Python path for imports
+project_root = str(Path(__file__).parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+from src.licensing import ensure_feature_license
 from openai import OpenAI
 
 # Load environment
 load_dotenv()
+
+# Enforce licensing for video generation agent
+ensure_feature_license("video")
 
 # =============================================================================
 # 🔧 CONFIGURATION 

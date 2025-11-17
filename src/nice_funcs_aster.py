@@ -24,8 +24,8 @@ import time
 from termcolor import cprint
 from dotenv import load_dotenv
 
-# Add Aster Dex Trading Bots to path
-aster_bots_path = '/Users/md/Dropbox/dev/github/Aster-Dex-Trading-Bots'
+# Add Aster Dex Trading Bots to path (configurable via env, with sensible default)
+aster_bots_path = os.getenv('ASTER_BOTS_PATH', '/Users/md/Dropbox/dev/github/Aster-Dex-Trading-Bots')
 if aster_bots_path not in sys.path:
     sys.path.insert(0, aster_bots_path)
 

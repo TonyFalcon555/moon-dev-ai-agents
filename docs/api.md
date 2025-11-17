@@ -6,7 +6,6 @@
 - [Authentication](#authentication)
 - [Market Data Methods](#market-data-methods)
 - [CopyBot Methods](#copybot-methods)
-- [Utility Methods](#utility-methods)
 - [Example Usage](#example-usage)
 
 ## Overview
@@ -41,35 +40,32 @@ api = MoonDevAPI()  # Automatically loads API key from .env
 
 ### Get Liquidation Data
 ```python
-# Get all liquidations
-liq_data = api.get_liq_data()
+# Get latest 50,000 liquidation records (recommended for most use cases)
+liq_data = api.get_liquidation_data(limit=50_000)
 
-# Get liquidations for specific symbol
-btc_liq_data = api.get_liq_data(symbol="BTC", limit=100000)
+# Get the full historical dataset (large, 1.5GB+)
+all_liq_data = api.get_liquidation_data()  # limit=None
 ```
 
 ### Get Funding Rate Data
 ```python
-# Get all funding rates
-funding_data = api.get_funding_rate()
-
-# Get funding rate for specific symbol
-btc_funding = api.get_funding_rate(symbol="BTC")
+# Get current funding data across supported symbols/exchanges
+funding_data = api.get_funding_data()
 ```
 
 ### Get Open Interest Data
 ```python
-# Get symbol-specific open interest
-oi_data = api.get_open_interest(symbol="BTC")
+# Detailed open interest data (per symbol/exchange)
+oi_data = api.get_oi_data()
 
-# Get total market open interest
-total_oi = api.get_open_interest(total=True)
+# Total open interest aggregates
+total_oi = api.get_oi_total()
 ```
 
 ### Get New Token Launches
 ```python
-# Get latest token launches
-new_tokens = api.get_new_token_addresses()
+# Get latest token launches (e.g. new Solana tokens)
+new_tokens = api.get_token_addresses()
 ```
 
 ## CopyBot Methods
@@ -83,15 +79,7 @@ follow_list = api.get_copybot_follow_list()
 ### Get Recent Transactions
 ```python
 # Get recent copy trading transactions
-recent_txs = api.get_recent_transactions()
-```
-
-## Utility Methods
-
-### List Available Files
-```python
-# Get list of all available data files
-available_files = api.list_available_files()
+recent_txs = api.get_copybot_recent_transactions()
 ```
 
 ## Example Usage
@@ -100,36 +88,33 @@ Here's a complete example showing how to use the API:
 
 ```python
 from src.agents.api import MoonDevAPI
-import time
 
-# Initialize API
+# Initialize API (uses MOONDEV_API_KEY from .env if present)
 api = MoonDevAPI()
 
-# Get BTC data
-symbol = "BTC"
+# Market data
+liq_data = api.get_liquidation_data(limit=50_000)
+funding_data = api.get_funding_data()
+oi_data = api.get_oi_data()
+oi_total = api.get_oi_total()
+new_tokens = api.get_token_addresses()
 
-# Market Data
-liq_data = api.get_liq_data(symbol)
-funding_data = api.get_funding_rate(symbol)
-oi_data = api.get_open_interest(symbol)
-
-# CopyBot Data
+# CopyBot data
 follow_list = api.get_copybot_follow_list()
-recent_txs = api.get_recent_transactions()
-
-# List available files
-api.list_available_files()
+recent_txs = api.get_copybot_recent_transactions()
 ```
 
 ## Data Storage
 
-By default, all data is saved to `src/agents/api_data/`. The following files are created:
-- `liq_data.csv`: Liquidation data
+By default, all data is saved to `src/agents/api_data/`. Common files include:
+- `liq_data.csv`: Liquidation data (latest chunked download)
 - `funding.csv`: Funding rate data
-- `oi.csv`: Open interest data
+- `oi.csv`: Detailed open interest data
 - `oi_total.csv`: Total market open interest
+- `new_token_addresses.csv`: New token launches
 - `follow_list.csv`: Copy trading follow list
 - `recent_txs.csv`: Recent copy trading transactions
+- `whale_addresses.txt`: Whale address list
 
 ## Error Handling
 

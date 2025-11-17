@@ -1,4 +1,15 @@
 - [ALL DOCUMENTATION VIDEOS](https://www.youtube.com/playlist?list=PLXrNVMjRZUJg4M4uz52iGd1LhXXGVbIFz)
+# Moon Dev Docs
+
+## Quick Links
+
+- [Monetization Overview](monetization_overview.md)
+- [Deployment Stack](deployment_stack.md)
+- [Market Data API](api.md)
+- [Backtest Dashboard](backtest_dashboard.md)
+- [Licensing & Plans](licensing.md)
+
+---
 
 - there are also docs in the docs folder for each agent.
 

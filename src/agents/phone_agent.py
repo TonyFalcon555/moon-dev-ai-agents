@@ -39,11 +39,16 @@ project_root = str(Path(__file__).parent.parent.parent)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
+from src.licensing import ensure_feature_license
+
 # Load environment variables
 if not TESTING_MODE:
     from dotenv import load_dotenv
     load_dotenv()
-    
+
+    # Enforce licensing only in real Twilio/server mode
+    ensure_feature_license("phone")
+
     # Initialize OpenAI client with correct env var name
     openai.api_key = os.getenv("OPENAI_KEY")
     if not openai.api_key:

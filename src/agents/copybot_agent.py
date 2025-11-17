@@ -23,7 +23,10 @@ from src import nice_funcs as n
 from src.data.ohlcv_collector import collect_all_tokens, collect_token_data
 
 # Data path for current copybot portfolio
-COPYBOT_PORTFOLIO_PATH = '/Users/md/Dropbox/dev/github/solana-copy-trader/csvs/current_portfolio.csv'
+COPYBOT_PORTFOLIO_PATH = os.getenv(
+    "COPYBOT_PORTFOLIO_PATH",
+    "/Users/md/Dropbox/dev/github/solana-copy-trader/csvs/current_portfolio.csv",
+)
 
 # LLM Prompts
 PORTFOLIO_ANALYSIS_PROMPT = """
