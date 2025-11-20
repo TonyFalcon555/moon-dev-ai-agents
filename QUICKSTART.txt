@@ -1,0 +1,54 @@
+🌙 MOON DEV - GET PROFITABLE IN 3 STEPS
+=========================================
+
+STEP 1: SETUP (10 minutes)
+---------------------------
+Open .env file and fill in:
+
+1. STRIPE_SECRET_KEY - Get from https://dashboard.stripe.com/test/apikeys
+2. STRIPE_WEBHOOK_SECRET - Get from https://dashboard.stripe.com/test/webhooks
+3. PRICE_ID_PRO - Create product at https://dashboard.stripe.com/test/products
+4. PRICE_ID_TEAM - Same as above
+5. PRICE_ID_ENTERPRISE - Same as above
+6. ALERTS_DISCORD_WEBHOOK_URL - Discord Server Settings > Webhooks
+
+Need help? Run: ./setup_stripe.sh
+
+
+STEP 2: TEST LOCALLY (5 minutes)
+---------------------------------
+./deploy.sh
+./test_stack.sh
+
+If all green, you're ready!
+
+
+STEP 3: GO LIVE (follow docs/launch_checklist.md)
+--------------------------------------------------
+Phase 2: Deploy to VPS with HTTPS
+Phase 3: Switch to live Stripe keys
+Phase 4: Create landing page
+Phase 5: Launch to first customers
+
+
+THAT'S IT. THREE STEPS TO PROFIT.
+
+
+Quick Commands:
+---------------
+Start:  ./deploy.sh
+Test:   ./test_stack.sh
+Stop:   docker compose down
+Logs:   docker compose logs -f
+
+
+Demo Scripts (after ./deploy.sh):
+----------------------------------
+python src/scripts/demo_billing_gateway_client.py
+python src/scripts/demo_alerts_client.py
+python src/scripts/demo_backtest_dashboard_client.py
+
+
+Need Help?
+----------
+Check: docs/launch_checklist.md (full walkthrough)

@@ -147,15 +147,52 @@ The RBI Agent takes your trading ideas (from YouTube videos, PDFs, or plain text
 - Fork to your GitHub account to get your own copy
 - This lets you make changes and track updates
 
-### Step 2: 💻 Clone to Your Machine
-```bash
-git clone https://github.com/YOUR_USERNAME/moon-dev-ai-agents-for-trading.git
-cd moon-dev-ai-agents-for-trading
-```
+### 🛠️ Quick Start
 
-**Recommended IDEs:**
-- [Cursor](https://www.cursor.com/) - AI-enabled coding
-- [Windsurfer](https://codeium.com/) - AI-enabled coding
+### Prerequisites
+- Python 3.10+
+- Docker & Docker Compose
+
+### Installation
+
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/moon-dev-ai-agents/moon-dev-ai-agents.git
+    cd moon-dev-ai-agents
+    ```
+
+2.  **Install Dependencies**
+    ```bash
+    # Create virtual environment
+    python -m venv venv
+    source venv/bin/activate
+    
+    # Install development dependencies
+    pip install -r requirements-dev.txt
+    ```
+
+3.  **Set up Environment**
+    ```bash
+    cp .env.example .env
+    # Edit .env with your API keys
+    ```
+
+4.  **Run Database (PostgreSQL)**
+    ```bash
+    docker-compose up -d postgres
+    ```
+
+5.  **Run Tests**
+    ```bash
+    pytest tests/ -v
+    ```
+
+### 🚀 Running the Stack
+To run the full stack (API Gateway, Billing, Dashboard, Alerts):
+```bash
+docker-compose up --build
+```
+coding
 
 ### Step 3: 🔑 Set Up Environment Variables
 
@@ -343,7 +380,7 @@ The agent will automatically download and cache the data.
 
 ---
 
-*Built with love by Moon Dev - Pioneering the future of AI-powered trading*
+*Built with love# 🦅 Falcon Finance AI Agentseering the future of AI-powered trading*
 
 ## 📜 Detailed Disclaimer
 The content presented is for educational and informational purposes only and does not constitute financial advice. All trading involves risk and may not be suitable for all investors. You should carefully consider your investment objectives, level of experience, and risk appetite before investing.

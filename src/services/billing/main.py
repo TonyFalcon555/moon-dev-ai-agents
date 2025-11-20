@@ -133,7 +133,8 @@ async def webhook(request: Request):
                         "Provisioned API key for plan=%s email=%s subscription=%s", plan, customer_email, sub
                     )
                     # Log the raw key for local testing visibility
-                    logging.getLogger("billing").info("New API key: %s", key)
+                    safe_key = f"{key[:6]}...{key[-4:]}" if isinstance(key, str) and len(key) >= 10 else "redacted"
+                    logging.getLogger("billing").info("New API key prefix: %s", safe_key)
                 except Exception:
                     pass
             except Exception:

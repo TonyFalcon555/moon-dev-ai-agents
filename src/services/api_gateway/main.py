@@ -1,6 +1,8 @@
 import os
 import time
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Tuple
 
 import requests
@@ -60,6 +62,48 @@ PLAN_LIMITS: Dict[str, int] = {
     "team": 2400,
     "enterprise": 10000,
 }
+
+PLANS_META: Dict[str, dict] = {}
+
+
+def _load_plans_meta() -> Dict[str, dict]:
+    """Load plan metadata from plans.json, falling back to PLAN_LIMITS.
+
+    The JSON file is expected to live alongside this module and contain a
+    mapping of plan name → { name, description, rpm }.
+    """
+
+    global PLANS_META
+    if PLANS_META:
+        return PLANS_META
+
+    try:
+        base = Path(__file__).resolve().parent
+        plan_path = base / "plans.json"
+        with plan_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Ensure rpm is always present, falling back to PLAN_LIMITS
+        for plan, meta in data.items():
+            rpm = meta.get("rpm") or PLAN_LIMITS.get(plan)
+            if rpm is None:
+                rpm = PLAN_LIMITS.get("free", 60)
+            meta["rpm"] = int(rpm)
+
+        PLANS_META = data
+    except Exception:
+        # Fallback: build simple metadata from PLAN_LIMITS only
+        PLANS_META = {
+            name: {
+                "name": name,
+                "description": "",
+                "rpm": rpm,
+            }
+            for name, rpm in PLAN_LIMITS.items()
+        }
+
+    return PLANS_META
+
 
 rate_state: Dict[str, Dict[str, int]] = {}
 
@@ -165,6 +209,18 @@ def whoami(request: Request) -> JSONResponse:
         "limit_per_min": limit,
         "mode": "keystore" if (KEYSTORE_ENABLED and _KS_OK) else "env_keys",
     })
+
+
+@app.get("/plans")
+def plans() -> JSONResponse:
+    """Return plan metadata (names, descriptions, and RPM limits).
+
+    This does not require authentication and is intended for frontends or
+    dashboards that need to display plan information.
+    """
+
+    meta = _load_plans_meta()
+    return JSONResponse({"plans": meta})
 
 
 @app.get("/metrics")

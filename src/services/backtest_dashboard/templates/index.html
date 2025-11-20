@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moon Dev AI Agents | Backtest Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fa-solid fa-moon"></i>
+                <span>Moon Dev</span>
+            </div>
+            <nav>
+                <a href="/" class="active"><i class="fa-solid fa-chart-line"></i> Dashboard</a>
+                <a href="/data"><i class="fa-solid fa-database"></i> Data Portal</a>
+                <a href="/liquidations"><i class="fa-solid fa-water"></i> Liquidations</a>
+                <a href="/polymarket"><i class="fa-solid fa-store"></i> Polymarket</a>
+            </nav>
+            <div class="user-profile">
+                <div class="avatar">MD</div>
+                <div class="info">
+                    <span class="name">Admin User</span>
+                    <span class="role">Pro Plan</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-bar">
+                <h1>Backtest Overview</h1>
+                <div class="actions">
+                    <button class="btn-secondary" id="refresh-btn"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
+                    <button class="btn-primary" id="new-run-btn"><i class="fa-solid fa-play"></i> New Backtest</button>
+                </div>
+            </header>
+
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="icon purple"><i class="fa-solid fa-flask"></i></div>
+                    <div class="details">
+                        <h3>Total Backtests</h3>
+                        <p id="total-backtests">Loading...</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon blue"><i class="fa-solid fa-lightbulb"></i></div>
+                    <div class="details">
+                        <h3>Unique Strategies</h3>
+                        <p id="unique-strategies">Loading...</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon green"><i class="fa-solid fa-arrow-trend-up"></i></div>
+                    <div class="details">
+                        <h3>Avg Return</h3>
+                        <p id="avg-return">Loading...</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon orange"><i class="fa-solid fa-shield-halved"></i></div>
+                    <div class="details">
+                        <h3>Avg Sortino</h3>
+                        <p id="avg-sortino">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Table -->
+            <div class="table-container">
+                <div class="table-header">
+                    <h2>Recent Runs</h2>
+                    <div class="search-box">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-input" placeholder="Search strategies...">
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table id="backtest-table">
+                        <thead>
+                            <tr>
+                                <th>Strategy</th>
+                                <th>Return %</th>
+                                <th>Sharpe</th>
+                                <th>Sortino</th>
+                                <th>Drawdown</th>
+                                <th>Trades</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Rows will be populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

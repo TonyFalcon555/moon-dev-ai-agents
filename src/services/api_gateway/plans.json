@@ -1,0 +1,22 @@
+{
+  "free": {
+    "name": "free",
+    "description": "For experimentation and local development. Low request limits.",
+    "rpm": 60
+  },
+  "pro": {
+    "name": "pro",
+    "description": "For individual traders and builders who need higher limits and production usage.",
+    "rpm": 600
+  },
+  "team": {
+    "name": "team",
+    "description": "For small teams or desks running multiple bots/users.",
+    "rpm": 2400
+  },
+  "enterprise": {
+    "name": "enterprise",
+    "description": "For high‑volume or custom integrations with SLAs.",
+    "rpm": 10000
+  }
+}

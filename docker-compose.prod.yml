@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: falcon-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: falcon_finance_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: src/services/api_gateway/Dockerfile
+    container_name: falcon-api-gateway
+    command: uvicorn src.services.api_gateway.main:app --host 0.0.0.0 --port 8010
+    ports:
+      - "8010:8010"
+    environment:
+      - KEYSTORE_DB_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/falcon_finance_db
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  billing:
+    build:
+      context: .
+      dockerfile: src/services/billing/Dockerfile
+    container_name: falcon-billing
+    command: uvicorn src.services.billing.main:app --host 0.0.0.0 --port 8011
+    ports:
+      - "8011:8011"
+    environment:
+      - KEYSTORE_DB_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/falcon_finance_db
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PRICE_ID_PRO=${STRIPE_PRICE_ID_PRO}
+      - STRIPE_PRICE_ID_ENTERPRISE=${STRIPE_PRICE_ID_ENTERPRISE}
+    depends_on:
+      - api-gateway
+    restart: always
+
+  alerts:
+    build:
+      context: .
+      dockerfile: src/services/alerts/Dockerfile
+    container_name: falcon-alerts
+    command: uvicorn src.services.alerts.main:app --host 0.0.0.0 --port 8012
+    ports:
+      - "8012:8012"
+    environment:
+      - KEYSTORE_DB_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/falcon_finance_db
+      - ALERTS_DISCORD_WEBHOOK_URL=${ALERTS_DISCORD_WEBHOOK_URL}
+    depends_on:
+      - api-gateway
+    restart: always
+
+  backtest-dashboard:
+    build:
+      context: .
+      dockerfile: src/services/backtest_dashboard/Dockerfile
+    container_name: falcon-dashboard
+    command: uvicorn src.services.backtest_dashboard.main:app --host 0.0.0.0 --port 8002
+    ports:
+      - "8002:8002"
+    environment:
+      - KEYSTORE_DB_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/falcon_finance_db
+      - TEST_MODE=0
+      - RBI_WORKSPACE_NAME=${RBI_WORKSPACE_NAME:-default}
+    depends_on:
+      - api-gateway
+    restart: always
+
+  docs:
+    build:
+      context: .
+      dockerfile: src/services/alerts/Dockerfile # Re-using a simple python base
+    container_name: falcon-docs
+    command: uvicorn src.services.docs.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    restart: always
+
+  www:
+    build:
+      context: .
+      dockerfile: src/services/alerts/Dockerfile
+    container_name: falcon-www
+    command: uvicorn src.services.www.main:app --host 0.0.0.0 --port 8080
+    ports:
+      - "8080:8080"
+    restart: always
+
+volumes:
+  postgres_data:

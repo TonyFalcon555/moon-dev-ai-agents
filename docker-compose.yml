@@ -1,20 +1,39 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:13
+    container_name: falcon-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=falcon_finance_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api-gateway:
     build:
-      context: .
-      dockerfile: src/services/api_gateway/Dockerfile
-    container_name: moondev-api-gateway
+      context: ./src/services/api_gateway
+    container_name: falcon-api-gateway
     ports:
-      - "8010:8010"
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
-      USE_KEYSTORE: "1"
-      PORT: "8010"
-      KEYSTORE_DB_PATH: "/data/keystore.sqlite3"
-      USAGE_DB_PATH: "/data/usage.sqlite3"
-      UPSTREAM_API_BASE_URL: "http://api.moondev.com:8000"
-      # UPSTREAM_API_KEY: "changeme"
+      - KEYSTORE_DB_URL=postgresql://postgres:postgres@postgres:5432/falcon_finance_db
+      - USE_KEYSTORE=${USE_KEYSTORE:-1}
+      - PORT=${API_GATEWAY_PORT:-8010}
+      - USAGE_DB_PATH=${USAGE_DB_PATH:-/data/usage.sqlite3}
+      - UPSTREAM_API_BASE_URL=${UPSTREAM_API_BASE_URL:-http://api.moondev.com:8000}
+      - UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-}
     volumes:
       - api_data:/data
 
@@ -22,19 +41,19 @@ services:
     build:
       context: .
       dockerfile: src/services/billing/Dockerfile
-    container_name: moondev-billing
+    container_name: falcon-billing
     ports:
-      - "8011:8011"
+      - "${BILLING_PORT:-8011}:8011"
     environment:
-      STRIPE_SECRET_KEY: "changeme"
-      STRIPE_WEBHOOK_SECRET: "changeme"
-      PRICE_ID_PRO: "price_pro_changeme"
-      PRICE_ID_TEAM: "price_team_changeme"
-      PRICE_ID_ENTERPRISE: "price_enterprise_changeme"
-      RATE_LIMIT_PRO: "600"
-      RATE_LIMIT_TEAM: "2400"
-      RATE_LIMIT_ENTERPRISE: "10000"
-      KEYSTORE_DB_PATH: "/data/keystore.sqlite3"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:?Set STRIPE_SECRET_KEY}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:?Set STRIPE_WEBHOOK_SECRET}"
+      PRICE_ID_PRO: "${PRICE_ID_PRO:?Set PRICE_ID_PRO}"
+      PRICE_ID_TEAM: "${PRICE_ID_TEAM:?Set PRICE_ID_TEAM}"
+      PRICE_ID_ENTERPRISE: "${PRICE_ID_ENTERPRISE:?Set PRICE_ID_ENTERPRISE}"
+      RATE_LIMIT_PRO: "${RATE_LIMIT_PRO:-600}"
+      RATE_LIMIT_TEAM: "${RATE_LIMIT_TEAM:-2400}"
+      RATE_LIMIT_ENTERPRISE: "${RATE_LIMIT_ENTERPRISE:-10000}"
+      KEYSTORE_DB_PATH: "${KEYSTORE_DB_PATH:-/data/keystore.sqlite3}"
     volumes:
       - api_data:/data
     depends_on:
@@ -44,17 +63,18 @@ services:
     build:
       context: .
       dockerfile: src/services/alerts/Dockerfile
-    container_name: moondev-alerts
+    container_name: falcon-alerts
     ports:
-      - "8012:8012"
+      - "${ALERTS_PORT:-8012}:8012"
     environment:
-      ALERTS_PORT: "8012"
-      ALERTS_DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/your_webhook_here"
-      KEYSTORE_DB_PATH: "/data/keystore.sqlite3"
-      ALERTS_MAX_FREE: "3"
-      ALERTS_MAX_PRO: "20"
-      ALERTS_MAX_TEAM: "50"
-      ALERTS_MAX_ENTERPRISE: "200"
+      ALERTS_PORT: "${ALERTS_PORT:-8012}"
+      ALERTS_DISCORD_WEBHOOK_URL: "${ALERTS_DISCORD_WEBHOOK_URL:?Set ALERTS_DISCORD_WEBHOOK_URL}"
+      KEYSTORE_DB_PATH: "${KEYSTORE_DB_PATH:-/data/keystore.sqlite3}"
+      ALERTS_POLL_INTERVAL: "${ALERTS_POLL_INTERVAL:-60}"
+      ALERTS_MAX_FREE: "${ALERTS_MAX_FREE:-3}"
+      ALERTS_MAX_PRO: "${ALERTS_MAX_PRO:-20}"
+      ALERTS_MAX_TEAM: "${ALERTS_MAX_TEAM:-50}"
+      ALERTS_MAX_ENTERPRISE: "${ALERTS_MAX_ENTERPRISE:-200}"
     volumes:
       - api_data:/data
     depends_on:
@@ -62,22 +82,47 @@ services:
 
   backtest-dashboard:
     build:
-      context: .
-      dockerfile: src/services/backtest_dashboard/Dockerfile
-    container_name: moondev-backtest-dashboard
+      context: ./src/services/backtest_dashboard
+    container_name: falcon-backtest-dashboard
     ports:
       - "8002:8002"
-    environment:
-      # Example overrides; adjust as needed for your deployment
-      # TEST_MODE: "1"
-      # RBI_WORKSPACE_NAME: "default"
-      # LICENSE_GATEWAY_URL: "http://api-gateway:8010"
-      # LICENSE_API_KEY: "md_your_license_key"
-      # REQUIRE_LICENSE: "0"
     volumes:
-      - backtest_data:/app/src/data
+      - ./src/data:/app/src/data
+    environment:
+      - KEYSTORE_DB_URL=postgresql://postgres:postgres@postgres:5432/falcon_finance_db
+      - TEST_MODE=${BACKTEST_TEST_MODE:-0}
+      - RBI_WORKSPACE_NAME=${RBI_WORKSPACE_NAME:-default}
+      - LICENSE_GATEWAY_URL=${LICENSE_GATEWAY_URL:-http://api-gateway:8010}
+      - LICENSE_API_KEY=${LICENSE_API_KEY:-}
+      - REQUIRE_LICENSE=${REQUIRE_LICENSE:-0}
+    command: uvicorn src.services.backtest_dashboard.main:app --host 0.0.0.0 --port 8002 --reload
     depends_on:
       - api-gateway
+
+  docs:
+    build:
+      context: .
+      dockerfile: src/services/alerts/Dockerfile # Re-use a simple python dockerfile or just use the base
+    command: uvicorn src.services.docs.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  www:
+    build:
+      context: .
+      dockerfile: src/services/alerts/Dockerfile # Re-use a simple python dockerfile
+    container_name: falcon-www
+    command: uvicorn src.services.www.main:app --host 0.0.0.0 --port 8080 --reload
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./src:/app/src
+    environment:
+      - PYTHONUNBUFFERED=1
 
 volumes:
   api_data:

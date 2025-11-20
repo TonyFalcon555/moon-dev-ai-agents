@@ -7,6 +7,7 @@ FastAPI gateway that enforces API keys, per‑plan rate limits, and proxies to t
 - GET /whoami — checks your key (does not consume quota)
 - GET /quota — returns per‑minute usage window (does not consume quota)
 - GET /files/{filename}?limit=N — streaming proxy to upstream `/files/*`
+ - GET /plans — returns plan metadata (name, description, rpm)
 
 ## Env vars
 - UPSTREAM_API_BASE_URL (default: http://api.moondev.com:8000)
@@ -14,6 +15,12 @@ FastAPI gateway that enforces API keys, per‑plan rate limits, and proxies to t
 - USE_KEYSTORE=1 enables SQLite keystore (recommended)
 - API_KEYS (fallback when keystore disabled), format: `key1:pro,key2:team`
 - PORT (default 8010)
+
+Optional config:
+
+- `plans.json` file in this folder describing plans and their RPM limits.
+  - If present, `/plans` returns its contents.
+  - If missing or invalid, `/plans` falls back to the built-in `PLAN_LIMITS`.
 
 ## Keystore
 - SQLite DB at `src/services/api_gateway/keystore.sqlite3` (override with KEYSTORE_DB_PATH)

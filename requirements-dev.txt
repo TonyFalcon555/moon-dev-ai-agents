@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+stripe
+sqlalchemy
+psycopg2-binary
+pandas
+python-dotenv
+termcolor
+pytest
+pytest-mock
+pytest-asyncio
+httpx
+requests
+websockets
+jinja2
+python-multipart
+apscheduler

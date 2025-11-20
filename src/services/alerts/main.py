@@ -4,18 +4,13 @@ Moon Dev Alerts Service
 FastAPI service that lets users register alerts based on Moon Dev market data
 (liquidations, funding, etc.) and delivers notifications via Discord webhooks.
 
-This is an initial, in-memory implementation intended for:
-- Prototyping alert types
-- Integrating with the existing MoonDevAPI data layer
-- Validating demand for alerts as a product
-
-It authenticates requests using the same API keys as the API Gateway
-(through the keystore when available).
+This implementation uses PostgreSQL for persistence via the keystore module.
 """
 
 import os
 import time
 import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -26,49 +21,28 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import select, insert, delete, update
 
 # Local Moon Dev API client
 from src.agents.api import MoonDevAPI
 
-# Optional keystore integration (same pattern as API gateway)
+# Keystore integration (Required for DB access)
 try:
-    from src.services.api_gateway.keystore import get_plan_for_key
+    from src.services.api_gateway.keystore import get_plan_for_key, engine, alerts_table, init_db
     _KS_OK = True
 except Exception:
-    try:
-        from ..api_gateway.keystore import get_plan_for_key  # type: ignore
-        _KS_OK = True
-    except Exception:  # pragma: no cover - keystore optional
-        _KS_OK = False
+    # Fallback for tests if imports fail, though in this refactor we expect it to work
+    _KS_OK = False
 
 load_dotenv()
 
 app = FastAPI(title="Moon Dev Alerts Service")
 
-# In-memory alert storage (per-process). For production you would
-# replace this with a persistent store (SQLite/Postgres/Redis).
-ALERTS: Dict[str, Dict] = {}
-ALERT_STATE: Dict[str, Dict] = {}
-
 scheduler: Optional[AsyncIOScheduler] = None
 
 
 class AlertCreate(BaseModel):
-    """Payload for creating an alert.
-
-    type: one of:
-      - liquidation_spike  → sum of liquidations (USD) over a window
-      - funding_extreme    → extreme funding rates by absolute value
-      - whale_activity     → large changes in whale address count
-    threshold: numeric threshold (semantics depend on type).
-      - liquidation_spike: total USD size over window
-      - funding_extreme:   absolute funding rate (e.g. 0.001 = 0.1%)
-      - whale_activity:    absolute change in whale count since last check
-    window_minutes: lookback / cooldown window size in minutes
-    symbol: optional symbol (e.g. BTC, ETH) to filter on when applicable
-    description: optional free-text description
-    """
-
+    """Payload for creating an alert."""
     type: str
     threshold: float
     window_minutes: int = 15
@@ -91,11 +65,7 @@ def _hash_key(raw: str) -> str:
 
 
 def _get_owner_and_plan(request: Request) -> Tuple[str, str]:
-    """Resolve the caller's API key and plan via keystore when available.
-
-    Returns (owner_hash, plan).
-    """
-
+    """Resolve the caller's API key and plan via keystore."""
     api_key = request.headers.get("X-API-Key")
     if not api_key:
         raise HTTPException(status_code=401, detail="Missing X-API-Key")
@@ -112,49 +82,42 @@ def _get_owner_and_plan(request: Request) -> Tuple[str, str]:
 
 
 def _get_moon_api() -> MoonDevAPI:
-    # Simple singleton stored on app.state
     if not hasattr(app.state, "moon_api"):
         app.state.moon_api = MoonDevAPI()
-    return app.state.moon_api  # type: ignore[attr-defined]
+    return app.state.moon_api
 
 
 def _send_discord_notification(message: str) -> None:
     url = os.getenv("ALERTS_DISCORD_WEBHOOK_URL")
     if not url:
-        # No webhook configured; silently ignore
         return
     try:
         requests.post(url, json={"content": message}, timeout=5)
     except Exception:
-        # Do not crash scheduler on notification failures
         pass
 
 
-def _evaluate_liquidation_spike(alert_id: str, alert_data: Dict) -> None:
-    """Check for liquidation spikes using MoonDevAPI liquidation data.
+# ============================================================================
+# 🌙 ALERT EVALUATION LOGIC
+# ============================================================================
 
-    This implementation is intentionally conservative: if it cannot reliably
-    identify timestamps or USD sizes, it simply skips the alert.
-    """
-
-    cfg: AlertCreate = alert_data["config"]
-    symbol = cfg.symbol
-    threshold = cfg.threshold
-    window_minutes = cfg.window_minutes
+def _evaluate_liquidation_spike(alert_id: str, config: Dict, state: Dict) -> Optional[Dict]:
+    symbol = config.get("symbol")
+    threshold = config.get("threshold")
+    window_minutes = config.get("window_minutes", 15)
 
     api = _get_moon_api()
     df = api.get_liquidation_data(limit=50000)
     if df is None or len(df) == 0:
-        return
+        return None
 
-    # Filter by symbol if provided
     try:
         if symbol and "symbol" in df.columns:
             df = df[df["symbol"] == symbol]
     except Exception:
-        return
+        return None
 
-    # Determine timestamp column
+    # Timestamp parsing
     ts_col = None
     if "datetime" in df.columns:
         ts_col = "datetime"
@@ -162,90 +125,86 @@ def _evaluate_liquidation_spike(alert_id: str, alert_data: Dict) -> None:
     elif "order_trade_time" in df.columns:
         ts_col = "order_trade_time"
         df[ts_col] = pd.to_datetime(df[ts_col], unit="ms", errors="coerce")
+    
     if ts_col is None:
-        return
+        return None
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=window_minutes)
+    
     try:
+        # Ensure timezone awareness compatibility
+        if df[ts_col].dt.tz is None:
+             df[ts_col] = df[ts_col].dt.tz_localize(timezone.utc)
+        
         df_window = df[df[ts_col] >= cutoff]
     except Exception:
-        return
+        return None
 
     if df_window.empty:
-        return
+        return None
 
-    # Determine USD size column
+    # USD Size
     usd_col = None
     if "usd_size" in df_window.columns:
         usd_col = "usd_size"
     elif "size" in df_window.columns:
         usd_col = "size"
+    
     if usd_col is None:
-        return
+        return None
 
     try:
         total_usd = float(df_window[usd_col].astype(float).sum())
     except Exception:
-        return
+        return None
 
     if total_usd < threshold:
-        return
+        return None
 
-    # Debounce: only trigger once per window per alert
-    state = ALERT_STATE.setdefault(alert_id, {})
-    last_ts: Optional[datetime] = state.get("last_trigger")
-    if last_ts and (now - last_ts) < timedelta(minutes=window_minutes):
-        return
+    # Debounce
+    last_ts_str = state.get("last_trigger")
+    if last_ts_str:
+        last_ts = datetime.fromisoformat(last_ts_str)
+        if (now - last_ts) < timedelta(minutes=window_minutes):
+            return None
 
-    state["last_trigger"] = now
-
+    # Trigger!
     symbol_str = symbol or "ALL"
     msg = (
         f"🌙 Moon Dev Alert: Liquidation spike detected for {symbol_str} "
         f"over last {window_minutes}m. Total ≈ ${total_usd:,.0f} (threshold ${threshold:,.0f})."
     )
     _send_discord_notification(msg)
+    
+    state["last_trigger"] = now.isoformat()
+    return state
 
 
-def _evaluate_funding_extreme(alert_id: str, alert_data: Dict) -> None:
-    """Check for extreme funding rates using MoonDevAPI funding data.
-
-    This looks for the maximum absolute funding rate across one or more
-    numeric "funding" / "rate" columns and compares it to the threshold.
-    The alert is debounced using window_minutes as a cooldown.
-    """
-
-    cfg: AlertCreate = alert_data["config"]
-    symbol = cfg.symbol
-    threshold = cfg.threshold
-    window_minutes = cfg.window_minutes
+def _evaluate_funding_extreme(alert_id: str, config: Dict, state: Dict) -> Optional[Dict]:
+    symbol = config.get("symbol")
+    threshold = config.get("threshold")
+    window_minutes = config.get("window_minutes", 15)
 
     api = _get_moon_api()
     df = api.get_funding_data()
     if df is None or len(df) == 0:
-        return
+        return None
 
     try:
         if symbol and "symbol" in df.columns:
             df = df[df["symbol"] == symbol]
     except Exception:
-        return
+        return None
 
     if df.empty:
-        return
+        return None
 
-    # Heuristically detect funding / rate columns
-    candidate_cols: List[str] = []
-    for col in df.columns:
-        name = str(col).lower()
-        if "fund" in name or "rate" in name:
-            candidate_cols.append(col)
-
+    candidate_cols = [c for c in df.columns if "fund" in str(c).lower() or "rate" in str(c).lower()]
     if not candidate_cols:
-        return
+        return None
 
-    max_abs_rate: Optional[float] = None
+    max_abs_rate = None
     for col in candidate_cols:
         try:
             series = pd.to_numeric(df[col], errors="coerce").abs()
@@ -257,15 +216,14 @@ def _evaluate_funding_extreme(alert_id: str, alert_data: Dict) -> None:
             continue
 
     if max_abs_rate is None or max_abs_rate < threshold:
-        return
+        return None
 
     now = datetime.now(timezone.utc)
-    state = ALERT_STATE.setdefault(alert_id, {})
-    last_ts: Optional[datetime] = state.get("last_trigger")
-    if last_ts and (now - last_ts) < timedelta(minutes=window_minutes):
-        return
-
-    state["last_trigger"] = now
+    last_ts_str = state.get("last_trigger")
+    if last_ts_str:
+        last_ts = datetime.fromisoformat(last_ts_str)
+        if (now - last_ts) < timedelta(minutes=window_minutes):
+            return None
 
     symbol_str = symbol or "ALL"
     msg = (
@@ -273,49 +231,41 @@ def _evaluate_funding_extreme(alert_id: str, alert_data: Dict) -> None:
         f"max |funding| ≈ {max_abs_rate:.4f} (threshold {threshold:.4f})."
     )
     _send_discord_notification(msg)
+    
+    state["last_trigger"] = now.isoformat()
+    return state
 
 
-def _evaluate_whale_activity(alert_id: str, alert_data: Dict) -> None:
-    """Check for changes in whale address count.
-
-    Uses MoonDevAPI.get_whale_addresses() and compares the absolute change in
-    count since the last evaluation to the threshold. The alert is debounced
-    using window_minutes as a cooldown.
-    """
-
-    cfg: AlertCreate = alert_data["config"]
-    threshold = cfg.threshold
-    window_minutes = cfg.window_minutes
+def _evaluate_whale_activity(alert_id: str, config: Dict, state: Dict) -> Optional[Dict]:
+    threshold = config.get("threshold")
+    window_minutes = config.get("window_minutes", 15)
 
     api = _get_moon_api()
     addresses = api.get_whale_addresses()
     if not addresses:
-        return
+        return None
 
     current_count = len(addresses)
     now = datetime.now(timezone.utc)
 
-    state = ALERT_STATE.setdefault(alert_id, {})
     last_count = state.get("last_count")
-
-    # First run: store baseline and return without alerting
+    
+    # First run
     if last_count is None:
         state["last_count"] = current_count
-        return
+        return state
 
     delta = current_count - int(last_count)
     if abs(delta) < threshold:
-        # Update baseline but do not alert
         state["last_count"] = current_count
-        return
+        return state
 
-    last_ts: Optional[datetime] = state.get("last_trigger")
-    if last_ts and (now - last_ts) < timedelta(minutes=window_minutes):
-        state["last_count"] = current_count
-        return
-
-    state["last_count"] = current_count
-    state["last_trigger"] = now
+    last_ts_str = state.get("last_trigger")
+    if last_ts_str:
+        last_ts = datetime.fromisoformat(last_ts_str)
+        if (now - last_ts) < timedelta(minutes=window_minutes):
+            state["last_count"] = current_count
+            return state
 
     direction = "increased" if delta > 0 else "decreased"
     msg = (
@@ -324,33 +274,58 @@ def _evaluate_whale_activity(alert_id: str, alert_data: Dict) -> None:
         f"threshold {threshold:.0f})."
     )
     _send_discord_notification(msg)
+    
+    state["last_count"] = current_count
+    state["last_trigger"] = now.isoformat()
+    return state
 
 
 def _run_all_alerts() -> None:
-    # Evaluate all alerts; errors should not stop the scheduler
-    for alert_id, data in list(ALERTS.items()):
+    if not _KS_OK:
+        return
+
+    # Fetch all alerts from DB
+    with engine.connect() as conn:
+        stmt = select(alerts_table)
+        rows = conn.execute(stmt).fetchall()
+
+    for row in rows:
         try:
-            cfg: AlertCreate = data["config"]
-            if cfg.type == "liquidation_spike":
-                _evaluate_liquidation_spike(alert_id, data)
-            elif cfg.type == "funding_extreme":
-                _evaluate_funding_extreme(alert_id, data)
-            elif cfg.type == "whale_activity":
-                _evaluate_whale_activity(alert_id, data)
-        except Exception:
-            # Swallow errors; log later if we add logging here
+            alert_id = row.id
+            config = row.config
+            state = row.state or {}
+            
+            new_state = None
+            
+            if config["type"] == "liquidation_spike":
+                new_state = _evaluate_liquidation_spike(alert_id, config, state)
+            elif config["type"] == "funding_extreme":
+                new_state = _evaluate_funding_extreme(alert_id, config, state)
+            elif config["type"] == "whale_activity":
+                new_state = _evaluate_whale_activity(alert_id, config, state)
+            
+            if new_state:
+                # Update state in DB
+                with engine.connect() as conn:
+                    upd = update(alerts_table).where(alerts_table.c.id == alert_id).values(state=new_state)
+                    conn.execute(upd)
+                    conn.commit()
+                    
+        except Exception as e:
+            print(f"Error processing alert {row.id}: {e}")
             continue
 
+
+# ============================================================================
+# 🛣️ ROUTES
+# ============================================================================
 
 @app.on_event("startup")
 def _startup() -> None:
     global scheduler
-    # For local dev convenience
-    try:
-        load_dotenv()
-    except Exception:
-        pass
-
+    if _KS_OK:
+        init_db()
+    
     poll_interval = int(os.getenv("ALERTS_POLL_INTERVAL", "60"))
     scheduler = AsyncIOScheduler()
     scheduler.add_job(_run_all_alerts, "interval", seconds=poll_interval)
@@ -366,18 +341,33 @@ def _shutdown() -> None:
 
 @app.get("/health")
 def health() -> JSONResponse:
+    count = 0
+    if _KS_OK:
+        with engine.connect() as conn:
+            count = conn.execute(select(alerts_table)).rowcount
+            
     return JSONResponse({
         "status": "ok",
         "time": datetime.now(timezone.utc).isoformat(),
-        "alerts_count": len(ALERTS),
+        "alerts_count": count,
+        "db_connected": _KS_OK
     })
 
+
+import uuid
+
+# ... (imports)
+
+# ...
 
 @app.post("/alerts", response_model=AlertOut)
 async def create_alert(alert: AlertCreate, request: Request) -> AlertOut:
     owner_hash, plan = _get_owner_and_plan(request)
 
-    # Basic per-plan quota example (can be tuned later)
+    if not _KS_OK:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    # Check quota
     per_plan_limits = {
         "free": int(os.getenv("ALERTS_MAX_FREE", "3")),
         "pro": int(os.getenv("ALERTS_MAX_PRO", "20")),
@@ -386,20 +376,28 @@ async def create_alert(alert: AlertCreate, request: Request) -> AlertOut:
     }
     max_alerts = per_plan_limits.get(plan, per_plan_limits["free"])
 
-    existing_for_owner = [a for a in ALERTS.values() if a.get("owner") == owner_hash]
-    if len(existing_for_owner) >= max_alerts:
-        raise HTTPException(status_code=429, detail="Alert quota exceeded for your plan")
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(alerts_table).where(alerts_table.c.owner_hash == owner_hash)
+        ).fetchall()
+        count = len(rows)
+        
+        if count >= max_alerts:
+            raise HTTPException(status_code=429, detail="Alert quota exceeded for your plan")
 
-    now = datetime.now(timezone.utc)
-    alert_id = f"a_{int(time.time() * 1000)}_{len(ALERTS) + 1}"
-    data = {
-        "id": alert_id,
-        "owner": owner_hash,
-        "plan": plan,
-        "config": alert,
-        "created_at": now,
-    }
-    ALERTS[alert_id] = data
+        now = datetime.now(timezone.utc)
+        alert_id = f"a_{uuid.uuid4().hex[:16]}"
+        
+        stmt = insert(alerts_table).values(
+            id=alert_id,
+            owner_hash=owner_hash,
+            plan=plan,
+            config=alert.model_dump(),
+            state={},
+            created_at=now
+        )
+        conn.execute(stmt)
+        conn.commit()
 
     return AlertOut(
         id=alert_id,
@@ -415,21 +413,26 @@ async def create_alert(alert: AlertCreate, request: Request) -> AlertOut:
 @app.get("/alerts", response_model=List[AlertOut])
 async def list_alerts(request: Request) -> List[AlertOut]:
     owner_hash, _ = _get_owner_and_plan(request)
+    
+    if not _KS_OK:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    with engine.connect() as conn:
+        stmt = select(alerts_table).where(alerts_table.c.owner_hash == owner_hash)
+        rows = conn.execute(stmt).fetchall()
+
     out: List[AlertOut] = []
-    for data in ALERTS.values():
-        if data.get("owner") != owner_hash:
-            continue
-        cfg: AlertCreate = data["config"]
-        created_at: datetime = data["created_at"]
+    for row in rows:
+        cfg = row.config
         out.append(
             AlertOut(
-                id=data["id"],
-                type=cfg.type,
-                threshold=cfg.threshold,
-                window_minutes=cfg.window_minutes,
-                symbol=cfg.symbol,
-                description=cfg.description,
-                created_at=created_at.isoformat(),
+                id=row.id,
+                type=cfg["type"],
+                threshold=cfg["threshold"],
+                window_minutes=cfg["window_minutes"],
+                symbol=cfg.get("symbol"),
+                description=cfg.get("description"),
+                created_at=row.created_at.isoformat(),
             )
         )
     return out
@@ -438,16 +441,28 @@ async def list_alerts(request: Request) -> List[AlertOut]:
 @app.delete("/alerts/{alert_id}")
 async def delete_alert(alert_id: str, request: Request) -> JSONResponse:
     owner_hash, _ = _get_owner_and_plan(request)
-    data = ALERTS.get(alert_id)
-    if not data or data.get("owner") != owner_hash:
-        raise HTTPException(status_code=404, detail="Alert not found")
-    ALERTS.pop(alert_id, None)
-    ALERT_STATE.pop(alert_id, None)
+    
+    if not _KS_OK:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    with engine.connect() as conn:
+        # Check ownership
+        stmt = select(alerts_table).where(
+            alerts_table.c.id == alert_id,
+            alerts_table.c.owner_hash == owner_hash
+        )
+        if not conn.execute(stmt).fetchone():
+            raise HTTPException(status_code=404, detail="Alert not found")
+            
+        # Delete
+        del_stmt = delete(alerts_table).where(alerts_table.c.id == alert_id)
+        conn.execute(del_stmt)
+        conn.commit()
+
     return JSONResponse({"deleted": True, "id": alert_id})
 
 
 if __name__ == "__main__":
     import uvicorn
-
     port = int(os.getenv("ALERTS_PORT", "8012"))
     uvicorn.run(app, host="0.0.0.0", port=port)
