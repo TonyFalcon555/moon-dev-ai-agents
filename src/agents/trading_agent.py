@@ -207,8 +207,8 @@ def monitor_position_pnl(token, check_interval=PNL_CHECK_INTERVAL):
     """Monitor position P&L and exit if stop loss or take profit hit
 
     Args:
-        token: Token symbol to monitor
-        check_interval: Seconds between P&L checks
+        token (str): Token symbol to monitor
+        check_interval (int): Seconds between P&L checks
 
     Returns:
         bool: True if position closed, False if still open
@@ -281,7 +281,7 @@ def monitor_position_pnl(token, check_interval=PNL_CHECK_INTERVAL):
         return False
 
 
-def get_account_balance():
+def get_account_balance() -> float:
     """Get account balance in USD based on exchange type
 
     Returns:
@@ -312,11 +312,11 @@ def get_account_balance():
         traceback.print_exc()
         return 0
 
-def calculate_position_size(account_balance):
+def calculate_position_size(account_balance: float) -> float:
     """Calculate position size based on account balance and MAX_POSITION_PERCENTAGE
 
     Args:
-        account_balance: Current account balance in USD
+        account_balance (float): Current account balance in USD
 
     Returns:
         float: Position size in USD (notional value)
@@ -407,7 +407,7 @@ class TradingAgent:
 
         cprint("\n🤖 Moon Dev's LLM Trading Agent initialized!", "green")
 
-    def chat_with_ai(self, system_prompt, user_content):
+    def chat_with_ai(self, system_prompt: str, user_content: str) -> str | None:
         """Send prompt to AI model via model factory"""
         try:
             response = self.model.generate_response(
@@ -539,7 +539,7 @@ FULL DATASET:
             cprint(f"❌ Error calculating swarm consensus: {e}", "red")
             return "NOTHING", 0, f"Error calculating consensus: {str(e)}"
 
-    def analyze_market_data(self, token, market_data):
+    def analyze_market_data(self, token: str, market_data: pd.DataFrame | dict | str) -> dict | str | None:
         """Analyze market data using AI model (single or swarm mode)"""
         try:
             # Skip analysis for excluded tokens

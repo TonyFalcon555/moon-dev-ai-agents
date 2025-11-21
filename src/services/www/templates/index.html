@@ -351,7 +351,7 @@
                         <li><i class="fas fa-check"></i> Basic Market Data</li>
                         <li><i class="fas fa-check"></i> Community Support</li>
                     </ul>
-                    <a href="#" class="btn btn-outline">Start Free</a>
+                    <a href="http://localhost:8002" class="btn btn-outline">Start Free</a>
                 </div>
 
                 <!-- Pro Tier -->
@@ -365,7 +365,7 @@
                         <li><i class="fas fa-check"></i> Whale Tracking</li>
                         <li><i class="fas fa-check"></i> Priority Support</li>
                     </ul>
-                    <a href="#" class="btn btn-primary">Get Pro</a>
+                    <button onclick="checkout('pro')" class="btn btn-primary">Get Pro</button>
                 </div>
 
                 <!-- Enterprise Tier -->
@@ -378,7 +378,7 @@
                         <li><i class="fas fa-check"></i> White Labeling</li>
                         <li><i class="fas fa-check"></i> 1-on-1 Setup</li>
                     </ul>
-                    <a href="#" class="btn btn-outline">Contact Us</a>
+                    <button onclick="checkout('team')" class="btn btn-outline">Get Team</button>
                 </div>
             </div>
         </div>
@@ -389,6 +389,33 @@
             <p>&copy; 2025 Falcon Finance. All rights reserved.</p>
         </div>
     </footer>
+
+    <script>
+        async function checkout(plan) {
+            try {
+                const response = await fetch('http://localhost:8011/create-checkout-session', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ plan: plan })
+                });
+
+                const data = await response.json();
+
+                if (data.url) {
+                    window.location.href = data.url;
+                } else if (data.detail) {
+                    alert('Error: ' + data.detail);
+                } else {
+                    alert('Error creating checkout session');
+                }
+            } catch (error) {
+                console.error('Checkout error:', error);
+                alert('Failed to initiate checkout. Please try again.');
+            }
+        }
+    </script>
 
 </body>
 

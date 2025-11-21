@@ -13,30 +13,31 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # Optional keystore integration
-KEYSTORE_ENABLED = os.getenv("USE_KEYSTORE", "0").lower() in ("1", "true", "yes")
+_KS_OK = False
 try:
     from src.services.api_gateway.keystore import init_db, get_plan_and_override
     _KS_OK = True
-except Exception:
+except ImportError:
     try:
         from .keystore import init_db, get_plan_and_override
         _KS_OK = True
-    except Exception:
-        _KS_OK = False
+    except ImportError:
+        logging.warning("Keystore module not found. Keystore features disabled.")
 
 UPSTREAM = os.getenv("UPSTREAM_API_BASE_URL", "http://api.moondev.com:8000")
 UPSTREAM_API_KEY = os.getenv("UPSTREAM_API_KEY")
 
 # Optional usage store integration
+_US_OK = False
 try:
     from src.services.api_gateway.usage_store import init_db as init_usage_db, record_usage, summarize as usage_summarize
     _US_OK = True
-except Exception:
+except ImportError:
     try:
         from .usage_store import init_db as init_usage_db, record_usage, summarize as usage_summarize
         _US_OK = True
-    except Exception:
-        _US_OK = False
+    except ImportError:
+        logging.warning("Usage store module not found. Usage tracking disabled.")
 
 def _parse_keys(env_val: str | None) -> Dict[str, str]:
     mapping: Dict[str, str] = {}

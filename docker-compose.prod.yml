@@ -29,8 +29,6 @@ services:
       - "8010:8010"
     environment:
       - KEYSTORE_DB_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/falcon_finance_db
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,8 +45,10 @@ services:
     environment:
       - KEYSTORE_DB_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/falcon_finance_db
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-      - STRIPE_PRICE_ID_PRO=${STRIPE_PRICE_ID_PRO}
-      - STRIPE_PRICE_ID_ENTERPRISE=${STRIPE_PRICE_ID_ENTERPRISE}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - PRICE_ID_PRO=${PRICE_ID_PRO}
+      - PRICE_ID_TEAM=${PRICE_ID_TEAM}
+      - PRICE_ID_ENTERPRISE=${PRICE_ID_ENTERPRISE}
     depends_on:
       - api-gateway
     restart: always

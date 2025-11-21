@@ -1,11 +1,11 @@
-# 🤖 AI AGENTS FOR TRADING
+# 🦅 Falcon Finance (Powered by Moon Dev AI Agents)
 
 <p align="center">
   <a href="https://www.moondev.com/"><img src="moondev.png" width="300" alt="Moon Dev"></a>
 </p>
 
 ## 🎯 Vision
-ai agents are clearly the future and the entire workforce will be replaced or atleast using ai agents. while i am a quant and building agents for algo trading i will be contributing to all different types of ai agent flows and placing all of the agents here for free, 100% open sourced because i believe code is the great equalizer and we have never seen a regime shift like this so i need to get this code to the people
+**Falcon Finance** is a production-ready AI trading platform built on top of the powerful Moon Dev AI Agents. Our mission is to democratize algorithmic trading by providing a robust, monetizable, and scalable foundation for deploying AI agents. Whether you are a quant, a developer, or a business owner, Falcon Finance provides the tools to launch your own AI trading business.
 
 feel free to join [our discord](https://discord.gg/8UPuVZ53bh) if you beleive ai agents will be integrated into the workforce
 
@@ -167,7 +167,10 @@ The RBI Agent takes your trading ideas (from YouTube videos, PDFs, or plain text
     python -m venv venv
     source venv/bin/activate
     
-    # Install development dependencies
+    # Install dependencies
+    pip install -r requirements.txt
+    
+    # Install development dependencies (for testing and linting)
     pip install -r requirements-dev.txt
     ```
 

@@ -5,9 +5,9 @@ services:
     image: postgres:13
     container_name: falcon-postgres
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=falcon_finance_db
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-falcon_finance_db}
     ports:
       - "5432:5432"
     volumes:
