@@ -1,6 +1,21 @@
 version: '3.8'
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: falcon-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: always
+
   postgres:
     image: postgres:15
     container_name: falcon-postgres
@@ -29,9 +44,18 @@ services:
       - "8010:8010"
     environment:
       - KEYSTORE_DB_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/falcon_finance_db
+      - USE_KEYSTORE=1
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: always
 
   billing:
@@ -50,7 +74,13 @@ services:
       - PRICE_ID_TEAM=${PRICE_ID_TEAM}
       - PRICE_ID_ENTERPRISE=${PRICE_ID_ENTERPRISE}
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: always
 
   alerts:
@@ -65,7 +95,13 @@ services:
       - KEYSTORE_DB_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/falcon_finance_db
       - ALERTS_DISCORD_WEBHOOK_URL=${ALERTS_DISCORD_WEBHOOK_URL}
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8012/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: always
 
   backtest-dashboard:
@@ -106,3 +142,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

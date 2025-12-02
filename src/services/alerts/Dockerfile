@@ -1,11 +1,11 @@
 # Moon Dev Alerts Service Dockerfile
-FROM python:3.13-slim
+FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
-# Minimal dependencies for alerts service
+# Minimal dependencies for alerts service (also used by www and docs)
 RUN pip install --no-cache-dir \
     fastapi==0.115.5 \
     uvicorn==0.32.1 \
@@ -13,7 +13,9 @@ RUN pip install --no-cache-dir \
     requests==2.32.3 \
     python-dotenv==1.0.0 \
     pandas==2.2.3 \
-    numpy==2.1.3
+    numpy==2.1.3 \
+    jinja2==3.1.4 \
+    aiofiles==24.1.0
 
 # Copy source code
 COPY . /app

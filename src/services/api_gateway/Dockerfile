@@ -1,12 +1,19 @@
 # Moon Dev API Gateway Dockerfile
-FROM python:3.13-slim
+FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
-# Install minimal deps
-RUN pip install --no-cache-dir fastapi==0.115.5 uvicorn==0.32.1 requests==2.32.3 python-dotenv==1.0.0
+# Install deps (including redis for rate limiting, sqlalchemy/psycopg2 for keystore)
+RUN pip install --no-cache-dir \
+    fastapi==0.115.5 \
+    uvicorn==0.32.1 \
+    requests==2.32.3 \
+    python-dotenv==1.0.0 \
+    sqlalchemy==2.0.23 \
+    psycopg2-binary==2.9.9 \
+    redis==5.0.0
 
 # Copy source
 COPY . /app

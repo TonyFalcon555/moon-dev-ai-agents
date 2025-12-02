@@ -135,9 +135,9 @@ async def webhook(request: Request):
                     # Log the raw key for local testing visibility
                     safe_key = f"{key[:6]}...{key[-4:]}" if isinstance(key, str) and len(key) >= 10 else "redacted"
                     logging.getLogger("billing").info("New API key prefix: %s", safe_key)
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as log_err:
+                    logging.getLogger("billing").warning("Failed to log key provisioning: %s", log_err)
+            except Exception as key_err:
+                logging.getLogger("billing").error("Failed to provision API key for plan=%s: %s", plan, key_err)
 
     return JSONResponse({"received": True, "type": et})

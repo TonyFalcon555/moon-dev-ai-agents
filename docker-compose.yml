@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:13
@@ -20,10 +18,11 @@ services:
 
   api-gateway:
     build:
-      context: ./src/services/api_gateway
+      context: .
+      dockerfile: src/services/api_gateway/Dockerfile
     container_name: falcon-api-gateway
     ports:
-      - "8000:8000"
+      - "${API_GATEWAY_PORT:-8010}:8010"
     depends_on:
       postgres:
         condition: service_healthy
@@ -125,5 +124,6 @@ services:
       - PYTHONUNBUFFERED=1
 
 volumes:
+  postgres_data:
   api_data:
   backtest_data:

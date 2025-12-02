@@ -368,9 +368,9 @@
                     <button onclick="checkout('pro')" class="btn btn-primary">Get Pro</button>
                 </div>
 
-                <!-- Enterprise Tier -->
+                <!-- Team Tier -->
                 <div class="pricing-card">
-                    <h3>Enterprise</h3>
+                    <h3>Team</h3>
                     <div class="price">$149<span>/mo</span></div>
                     <ul class="features-list">
                         <li><i class="fas fa-check"></i> Custom Agents</li>
@@ -391,14 +391,35 @@
     </footer>
 
     <script>
+        // Check for success/cancel from Stripe redirect
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('success') === 'true') {
+            setTimeout(() => {
+                alert('🎉 Payment successful! Check your email for your API key.');
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }, 500);
+        } else if (urlParams.get('canceled') === 'true') {
+            setTimeout(() => {
+                alert('Payment was canceled. Feel free to try again when ready.');
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }, 500);
+        }
+
         async function checkout(plan) {
             try {
-                const response = await fetch('http://localhost:8011/create-checkout-session', {
+                // Use relative URL for production, or configure via environment
+                const billingUrl = window.BILLING_URL || 'http://localhost:8011';
+                const response = await fetch(`${billingUrl}/billing/create-checkout-session`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ plan: plan })
+                    body: JSON.stringify({ 
+                        plan: plan,
+                        success_url: window.location.origin + '/?success=true',
+                        cancel_url: window.location.origin + '/?canceled=true',
+                        customer_email: null  // Can add email capture form
+                    })
                 });
 
                 const data = await response.json();

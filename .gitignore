@@ -2,6 +2,9 @@
 # Keep your secrets safe! 🔒
 
 # API Keys and Sensitive Data
+.env
+*.env.local
+*.env.*.local
 src/data/codetotext
 src/data/million_agent
 src/data/Arxiv

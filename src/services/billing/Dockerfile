@@ -1,12 +1,17 @@
 # Moon Dev Billing Service Dockerfile
-FROM python:3.13-slim
+FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
-# Minimal dependencies for billing
-RUN pip install --no-cache-dir fastapi==0.115.5 uvicorn==0.32.1 stripe==13.1.0
+# Dependencies for billing (includes keystore access for provisioning keys)
+RUN pip install --no-cache-dir \
+    fastapi==0.115.5 \
+    uvicorn==0.32.1 \
+    stripe==13.1.0 \
+    sqlalchemy==2.0.23 \
+    psycopg2-binary==2.9.9
 
 # Copy source code
 COPY . /app

@@ -1,5 +1,5 @@
 # Moon Dev Backtest Dashboard Dockerfile
-FROM python:3.13-slim
+FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

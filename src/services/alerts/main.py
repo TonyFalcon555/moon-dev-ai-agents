@@ -11,6 +11,7 @@ import os
 import time
 import hashlib
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -353,12 +354,6 @@ def health() -> JSONResponse:
         "db_connected": _KS_OK
     })
 
-
-import uuid
-
-# ... (imports)
-
-# ...
 
 @app.post("/alerts", response_model=AlertOut)
 async def create_alert(alert: AlertCreate, request: Request) -> AlertOut:

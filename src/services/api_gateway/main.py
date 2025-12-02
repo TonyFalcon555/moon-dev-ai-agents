@@ -8,11 +8,23 @@ from typing import Dict, Tuple
 import requests
 import logging
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, Request, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-# Optional keystore integration
+# Rate limiter integration
+try:
+    from src.services.api_gateway.rate_limiter import get_rate_limiter, RateLimitResult
+    _RL_OK = True
+except ImportError:
+    try:
+        from .rate_limiter import get_rate_limiter, RateLimitResult
+        _RL_OK = True
+    except ImportError:
+        _RL_OK = False
+        logging.warning("Rate limiter module not found. Using basic rate limiting.")
+
+# Keystore integration
 _KS_OK = False
 try:
     from src.services.api_gateway.keystore import init_db, get_plan_and_override
@@ -26,6 +38,9 @@ except ImportError:
 
 UPSTREAM = os.getenv("UPSTREAM_API_BASE_URL", "http://api.moondev.com:8000")
 UPSTREAM_API_KEY = os.getenv("UPSTREAM_API_KEY")
+
+# Keystore configuration - set USE_KEYSTORE=1 in .env to enable database-backed key management
+KEYSTORE_ENABLED = os.getenv("USE_KEYSTORE", "0").lower() in ("1", "true", "yes")
 
 # Optional usage store integration
 _US_OK = False
@@ -110,10 +125,16 @@ rate_state: Dict[str, Dict[str, int]] = {}
 
 app = FastAPI(title="Moon Dev API Gateway")
 
-# CORS (permissive; tighten in production)
+# CORS configuration - use ALLOWED_ORIGINS env var in production
+# Example: ALLOWED_ORIGINS=https://falconfinance.io,https://app.falconfinance.io
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+if ALLOWED_ORIGINS == ["*"]:
+    # Development mode - allow all origins
+    logging.warning("⚠️ CORS: Allowing all origins (set ALLOWED_ORIGINS in production)")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]

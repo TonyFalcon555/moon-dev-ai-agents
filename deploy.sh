@@ -1,61 +1,93 @@
 #!/bin/bash
-
-# Falcon Finance Deployment Script
-# Usage: ./deploy.sh
+# 🦅 Falcon Finance Deployment Script
+# Usage: ./deploy.sh [dev|prod]
 
 set -e
 
-echo "🦅 Starting Falcon Finance Deployment..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV="${1:-dev}"
 
-# 1. Check for Docker
-if ! command -v docker &> /dev/null; then
-    echo "🐳 Docker not found. Installing..."
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    rm get-docker.sh
-    echo "✅ Docker installed."
-else
-    echo "✅ Docker is already installed."
-fi
+echo "🦅 Falcon Finance Deployment"
+echo "================================"
+echo "Environment: $ENV"
+echo ""
 
-# 2. Check for Docker Compose
-if ! docker compose version &> /dev/null; then
-     echo "🐳 Docker Compose plugin not found. Installing..."
-     sudo apt-get update
-     sudo apt-get install -y docker-compose-plugin
-     echo "✅ Docker Compose installed."
-fi
-
-# 3. Setup Environment
+# Check for .env file
 if [ ! -f .env ]; then
-    echo "📝 Creating .env from template..."
-    # In a real scenario, you might pull this from a secure vault or ask user input
-    # For now, we create a basic one
-    cat <<EOF > .env
-POSTGRES_PASSWORD=$(openssl rand -hex 16)
-STRIPE_SECRET_KEY=sk_test_placeholder
-STRIPE_WEBHOOK_SECRET=whsec_placeholder
-ALERTS_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/placeholder
-OPENAI_KEY=sk-placeholder
-EOF
-    echo "⚠️  Created .env with placeholder values. PLEASE EDIT IT!"
-else
-    echo "✅ .env file exists."
+    echo "⚠️  .env file not found! Copying from .env.example..."
+    cp .env.example .env
+    echo "📝 PLEASE EDIT .env WITH YOUR ACTUAL SECRETS!"
+    echo "   Then run: ./deploy.sh $ENV"
+    exit 1
 fi
 
-# 4. Build and Launch
-echo "🚀 Launching Production Stack..."
-docker compose -f docker-compose.prod.yml up -d --build
+# Validate required environment variables
+source .env
+REQUIRED_VARS=("STRIPE_SECRET_KEY" "STRIPE_WEBHOOK_SECRET")
+MISSING=""
 
-echo "
-✨ Deployment Complete!
------------------------
-🌍 Sales Page: http://localhost:8080
-📊 Dashboard:  http://localhost:8002
-📚 API Docs:   http://localhost:8000
-gateway:       http://localhost:8010
+for var in "${REQUIRED_VARS[@]}"; do
+    if [ -z "${!var}" ] || [[ "${!var}" == *"..."* ]] || [[ "${!var}" == *"your_"* ]]; then
+        MISSING="$MISSING $var"
+    fi
+done
 
-👉 Next Step: Configure your .env file with real keys and restart:
-   nano .env
-   docker compose -f docker-compose.prod.yml up -d
-"
+if [ -n "$MISSING" ]; then
+    echo "⚠️  Missing or placeholder values for:$MISSING"
+    if [ "$ENV" == "prod" ]; then
+        echo "   Cannot deploy to production with missing values"
+        exit 1
+    fi
+fi
+
+# Function to check if service is healthy
+wait_for_health() {
+    local url=$1
+    local name=$2
+    local max_attempts=30
+    local attempt=1
+    
+    echo -n "   Waiting for $name..."
+    while [ $attempt -le $max_attempts ]; do
+        if curl -sf "$url" > /dev/null 2>&1; then
+            echo " ✅"
+            return 0
+        fi
+        echo -n "."
+        sleep 2
+        ((attempt++))
+    done
+    echo " ❌ (timeout)"
+    return 1
+}
+
+if [ "$ENV" == "prod" ]; then
+    echo "🚀 Deploying PRODUCTION stack..."
+    docker-compose -f docker-compose.prod.yml up -d --build
+else
+    echo "🔧 Starting DEVELOPMENT stack..."
+    docker-compose up -d --build
+fi
+
+# Wait for services
+echo ""
+echo "⏳ Waiting for services to start..."
+sleep 5
+wait_for_health "http://localhost:8010/health" "API Gateway" || true
+wait_for_health "http://localhost:8011/health" "Billing" || true
+
+echo ""
+echo "================================"
+echo "🎉 Deployment Complete!"
+echo ""
+echo "📍 Service URLs:"
+echo "   • Landing Page:  http://localhost:8080"
+echo "   • API Gateway:   http://localhost:8010"
+echo "   • Billing:       http://localhost:8011"
+echo "   • Alerts:        http://localhost:8012"
+echo "   • Dashboard:     http://localhost:8002"
+echo ""
+echo "📋 Next steps:"
+echo "   1. Create an API key: python scripts/create_api_key.py create --plan pro"
+echo "   2. Test the API: curl -H 'X-API-Key: YOUR_KEY' http://localhost:8010/whoami"
+echo ""
